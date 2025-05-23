@@ -3,7 +3,7 @@ from openai import OpenAI
 from app.config import OPENAI_API_KEY
 
 class GptClient:
-    DEFAULT_PROMPT_TEMPLATE = "Generate a comprehensive video script about: {topic} - this is a script for a reel"
+    DEFAULT_PROMPT_TEMPLATE = "Generate a 300 word content about: {topic} - this is a script for an engaging video that can be read aloud clearly by a human. Make sure the response is not like a complete script for the video - it should just be the content that needs to be read out by the narrator. Make the content engaging, attention catching and informative"
 
     def __init__(self, api_key=OPENAI_API_KEY, model="gpt-4o-2024-05-13"):
         self.client = OpenAI(api_key=api_key)
@@ -18,10 +18,12 @@ class GptClient:
                 messages=[
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=200  # Adjust as needed
+                max_tokens=500  # Increased max_tokens to accommodate longer scripts
             )
             if response.choices and response.choices[0].message.content:
-                return response.choices[0].message.content.strip()
+                # Remove newline characters and any leading/trailing whitespace
+                cleaned_script = response.choices[0].message.content.strip().replace('\n', ' ')
+                return cleaned_script
             else:
                 return "Error: Could not generate script."
         except Exception as e:
