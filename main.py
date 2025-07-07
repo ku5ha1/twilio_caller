@@ -1,18 +1,34 @@
-from google import genai
-from dotenv import load_dotenv
+from script_generator import ScriptGenerator
+from audio_generator import AudioGenerator
 import os
 
-load_dotenv()
+def main():
+    print("[INFO] Starting script generation...")
+    script_gen = ScriptGenerator()
+    script = script_gen.generate_script(topic="Real Estate Brokerage Using AI in Dubai")
+    
+    if script is None:
+        raise ValueError("Script generation failed — received None from LLM")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("Gemini API Key not found")
+    script_path = os.path.join("media", "output_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    
+    print("[SUCCESS] Script generated and saved to media/output_script.txt")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+    print("\n[INFO] Starting audio generation...\n")
+    audio_gen = AudioGenerator()
+    audio_file = audio_gen.generate_audio(script, output_file=os.path.join("media", "output_audio.mp3"))
 
-response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents="Generate a 300-word Instagram Reel script on the topic 'Usage of AI in Dubai Real Estate,' written exclusively for a middle-aged female real estate broker to deliver directly to the audience. The script should be engaging, conversational, and tailored as if she is speaking to viewers in a relatable yet professional tone. Include relevant statistics or examples to highlight how AI has transformed key segments of the UAE real estate market (e.g., property search, valuations, virtual tours, or customer service). Avoid any extraneous text like scene directions, shot descriptions, or labels (e.g., '[Intro music]'). The output should ONLY contain the spoken script—nothing else.",
-)
+    print("\n[INFO] Starting video generation...\n")
+    from video_generator import VideoGenerator
+    video_gen = VideoGenerator()
+    video_file = video_gen.generate_video(script_path, audio_file, output_file=os.path.join("media", "output_video.mp4"))
 
-print(response.text)
+    print("\n✅ MVP Progress:")
+    print(" - [x] Script generated")
+    print(" - [x] Audio generated")
+    print(" - [x] Video generated: " + video_file)
+
+if __name__ == "__main__":
+    main()
