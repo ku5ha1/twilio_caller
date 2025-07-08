@@ -1,0 +1,15 @@
+[
+  {"order": 1, "role": "BDE", "text": "Thank you for applying for the BDE role at Digi9, Bangalore. To help us take your application forward, please respond to the following:"},
+  {"order": 2, "role": "BDE", "text": "Full Name:"},
+  {"order": 3, "role": "BDE", "text": "Current Location:"},
+  {"order": 4, "role": "BDE", "text": "Current Company & Role:"},
+  {"order": 5, "role": "BDE", "text": "Current CTC & Expected CTC:"},
+  {"order": 6, "role": "BDE", "text": "Notice Period / Earliest Joining Date:"},
+  {"order": 7, "role": "BDE", "text": "Have you previously worked in a target-driven sales role? Briefly mention your targets and performance."},
+  {"order": 8, "role": "BDE", "text": "Do you have experience selling tech products or services? If yes, please describe briefly."},
+  {"order": 9, "role": "BDE", "text": "Have you engaged with decision-makers like CTOs, founders, or tech leads in your sales process?"},
+  {"order": 10, "role": "BDE", "text": "What types of products or services have you sold previously?"},
+  {"order": 11, "role": "BDE", "text": "Are you comfortable with a Work From Office (WFO) role based in Bangalore?"},
+  {"order": 12, "role": "BDE", "text": "Do you have a personal laptop you can use for work?"},
+  {"order": 13, "role": "BDE", "text": "Have you used any sales or CRM tools before? If yes, which ones?"}
+] 
