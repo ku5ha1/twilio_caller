@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Candidates - HR Interview System{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold mb-6 text-blue-800">Candidates</h2>
+<table class="min-w-full bg-white shadow-md rounded-lg overflow-hidden border border-gray-200">
+    <thead class="bg-blue-100">
+        <tr>
+            <th class="py-3 px-4 border-b">Name</th>
+            <th class="py-3 px-4 border-b">Phone</th>
+            <th class="py-3 px-4 border-b">Role</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for candidate in candidates %}
+        <tr class="{% if loop.index0 % 2 == 0 %}bg-gray-50{% else %}bg-white{% endif %} hover:bg-blue-50 transition">
+            <td class="py-2 px-4 border-b">{{ candidate.name }}</td>
+            <td class="py-2 px-4 border-b">{{ candidate.phone }}</td>
+            <td class="py-2 px-4 border-b">{{ candidate.role }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %} 

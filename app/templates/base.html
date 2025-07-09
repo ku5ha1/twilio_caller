@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="/static/css/tailwind.css" rel="stylesheet" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <title>{% block title %}HR Interview System{% endblock %}</title>
+    
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <header class="bg-blue-700 text-white p-4 mb-0">
+        <div class="container mx-auto">
+            <h1 class="text-2xl font-bold">HR Interview System</h1>
+        </div>
+    </header>
+    <nav class="bg-blue-600 text-white py-2 mb-6 shadow">
+        <div class="container mx-auto flex space-x-6">
+            <a href="/candidates-html" class="hover:underline transition">Candidates</a>
+            <a href="/questions-html" class="hover:underline transition">Questions</a>
+            <a href="/calls-html" class="hover:underline transition">Calls</a>
+            <a href="/answers-html" class="hover:underline transition">Answers</a>
+            <a href="/upload-candidates" class="hover:underline transition font-semibold text-yellow-200">Upload Candidates</a>
+        </div>
+    </nav>
+    <main class="container mx-auto bg-white rounded shadow p-8 mt-4">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html> 

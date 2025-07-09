@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Calls - HR Interview System{% endblock %}
+{% block content %}
+<h2 class="text-2xl font-bold mb-6 text-blue-800">Calls</h2>
+<table class="min-w-full bg-white shadow-md rounded-lg overflow-hidden border border-gray-200">
+    <thead class="bg-blue-100">
+        <tr>
+            <th class="py-3 px-4 border-b">Candidate ID</th>
+            <th class="py-3 px-4 border-b">Started At</th>
+            <th class="py-3 px-4 border-b">Completed At</th>
+            <th class="py-3 px-4 border-b">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for call in calls %}
+        <tr class="{% if loop.index0 % 2 == 0 %}bg-gray-50{% else %}bg-white{% endif %} hover:bg-blue-50 transition">
+            <td class="py-2 px-4 border-b">{{ call.candidate_id }}</td>
+            <td class="py-2 px-4 border-b">{{ call.started_at }}</td>
+            <td class="py-2 px-4 border-b">{{ call.completed_at }}</td>
+            <td class="py-2 px-4 border-b">{{ call.status }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %} 
