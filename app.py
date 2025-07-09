@@ -22,11 +22,13 @@ def start_call(phone: str):
     """Trigger an outbound call to the given phone number using Twilio."""
     client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     # Replace with your public ngrok URL or server URL
-    webhook_url = os.getenv("TWILIO_WEBHOOK_URL", "http://localhost:8000/twilio/voice")
+    webhook_url = os.getenv("TWILIO_WEBHOOK_URL")
+    if not webhook_url:
+        raise ValueError("TWILIO_WEBHOOK_URL is not set")
     try:
         call = client.calls.create(
             to=phone,
-            from_=TWILIO_PHONE_NUMBER,
+            from_=TWILIO_PHONE_NUMBER,  # type: ignore
             url=webhook_url
         )
         return JSONResponse({"status": "initiated", "call_sid": call.sid})

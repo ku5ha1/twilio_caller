@@ -7,4 +7,6 @@ __pycache__/
 *.pyo
 *.pyd   
 
-media/
+interview_questions.json
+
+candidates.xlsx
