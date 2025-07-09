@@ -3,9 +3,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+# Remove Twilio config, add Plivo config below as needed
+PLIVO_AUTH_ID = os.getenv("PLIVO_AUTH_ID")
+PLIVO_AUTH_TOKEN = os.getenv("PLIVO_AUTH_TOKEN")
+PLIVO_PHONE_NUMBER = os.getenv("PLIVO_PHONE_NUMBER")
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")

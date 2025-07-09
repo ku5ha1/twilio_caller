@@ -1,36 +1,44 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse, JSONResponse
-from twilio.twiml.voice_response import VoiceResponse
-from twilio.rest import Client
-from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
 import os
+from config import PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_PHONE_NUMBER
+import plivo
+from plivo import plivoxml
 
 app = FastAPI()
+
+PLIVO_PHONE_NUMBER = os.getenv("PLIVO_PHONE_NUMBER")
+if not PLIVO_PHONE_NUMBER:
+    raise ValueError('Phone number not found')
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-@app.post("/twilio/voice")
-def twilio_voice_webhook(request: Request):
-    response = VoiceResponse()
-    response.say("Hello, this is the automated HR interview system. Please wait while we begin your interview.")
-    return PlainTextResponse(str(response), media_type="application/xml")
-
 @app.post("/call/start")
 def start_call(phone: str):
-    """Trigger an outbound call to the given phone number using Twilio."""
-    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    # Replace with your public ngrok URL or server URL
-    webhook_url = os.getenv("TWILIO_WEBHOOK_URL")
-    if not webhook_url:
-        raise ValueError("TWILIO_WEBHOOK_URL is not set")
+    """Trigger an outbound call to the given phone number using Plivo."""
+    client = plivo.RestClient(PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN)
+    answer_url = os.getenv("PLIVO_ANSWER_URL", "https://your-server.com/plivo/answer")
     try:
-        call = client.calls.create(
-            to=phone,
-            from_=TWILIO_PHONE_NUMBER,  # type: ignore
-            url=webhook_url
+        response = client.calls.create(
+            from_=PLIVO_PHONE_NUMBER,
+            to_=phone,
+            answer_url=answer_url,
+            answer_method="POST"
         )
-        return JSONResponse({"status": "initiated", "call_sid": call.sid})
+        return JSONResponse({"status": "initiated", "call_uuid": response["request_uuid"]})
     except Exception as e:
-        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500) 
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
+
+@app.post("/plivo/answer")
+async def plivo_answer(request: Request):
+    response = plivoxml.ResponseElement()
+    response.add(
+        plivoxml.SpeakElement("Hello, this is the automated HR interview system. Please wait while we begin your interview.")
+    )
+    # Record the answer and send to /plivo/record
+    response.add(
+        plivoxml.RecordElement(action="https://your-server.com/plivo/record", method="POST")
+    )
+    return Response(content=response.to_string(), media_type="application/xml") 
