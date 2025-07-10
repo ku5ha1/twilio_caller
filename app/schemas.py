@@ -27,7 +27,7 @@ class CallCreate(BaseModel):
 
 class CallUpdate(BaseModel):
     status: Optional[str] = None
-    completed_at: Optional[str] = None
+    completed_at: Optional[str] = None 
 
 class AnswerCreate(BaseModel):
     call_id: int

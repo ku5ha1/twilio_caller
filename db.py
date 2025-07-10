@@ -25,6 +25,8 @@ class Call(Base):
     started_at = Column(DateTime, default=datetime.datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     status = Column(String, default="scheduled")
+    reschedule_time = Column(DateTime, nullable=True)
+    call_recording_url = Column(String, nullable=True)  # NEW: store call recording URL
     candidate = relationship("Candidate", back_populates="calls")
     answers = relationship("Answer", back_populates="call")
 
