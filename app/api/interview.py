@@ -253,6 +253,8 @@ def initiate_twilio_call(candidate_id: int, db: Session = Depends(get_db)):
     to_number = candidate.phone
 
     client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    import logging
+    logging.info(f"Using TWILIO_WEBHOOK_URL: {TWILIO_WEBHOOK_URL}")
     try:
         call = client.calls.create(
             to=to_number,
