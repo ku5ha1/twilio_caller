@@ -15,6 +15,7 @@ import json
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from fastapi import Response
+from urllib.parse import urlparse
 
 router = APIRouter()
 
@@ -194,7 +195,9 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         audio_path = f"media/{audio_filename}"
         if not os.path.exists(audio_path):
             generate_speech(question.text, audio_path)
-        response.play(f"https://yourdomain.com/{audio_path}")
+        TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
+        TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+        response.play(f"{TWILIO_BASE_URL}/{audio_path}")
         response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
         return Response(content=str(response), media_type="application/xml")
 
@@ -215,7 +218,9 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
             audio_path = f"media/{audio_filename}"
             if not os.path.exists(audio_path):
                 generate_speech(next_q.text, audio_path)
-            response.play(f"https://yourdomain.com/{audio_path}")
+            TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
+            TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+            response.play(f"{TWILIO_BASE_URL}/{audio_path}")
             response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
             return Response(content=str(response), media_type="application/xml")
         else:
@@ -239,7 +244,8 @@ def initiate_twilio_call(candidate_id: int, db: Session = Depends(get_db)):
     TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "YOUR_TWILIO_ACCOUNT_SID")
     TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "YOUR_TWILIO_AUTH_TOKEN")
     TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "YOUR_TWILIO_PHONE_NUMBER")
-    TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "https://yourdomain.com/twilio/webhook")
+    TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
+    TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
 
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not candidate:
