@@ -243,6 +243,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
     except Exception as e:
+        logging.error(f"Webhook error: {e}", exc_info=True)
         response = VoiceResponse()
         response.say("An unexpected error occurred. Goodbye.")
         response.hangup()
