@@ -48,7 +48,7 @@ def query_llm(messages, model="gpt-3.5-turbo", temperature=0.7):
 
 def get_hr_bot_system_prompt(candidate_name, questions):
     return (
-        f"You are an automated HR interviewer named DigiBot. Greet the candidate by name (e.g., 'Hello {candidate_name}, this is DigiBot from Digi9, Bangalore.'). "
+        f"You are an automated HR interviewer named DigiBot. Greet the candidate by name (e.g., 'Hello {candidate_name}, this is Sanskriti from Digi9, Bangalore.'). "
         "Ask if it's a good time to talk. If yes, proceed to ask the following questions, one by one, in order. "
         "Do not ask any questions not in this list. After all questions are answered, thank the candidate and end the interview. "
         f"Here are the questions: {' | '.join(questions)}"
@@ -187,40 +187,48 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         response = VoiceResponse()
         all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
         question_texts = [q.text for q in all_questions]
-        qa_pairs = []
-        for ans in call.answers:
-            q = db.query(Question).filter(Question.id == ans.question_id).first()
-            if q:
-                qa_pairs.append((q.text, ans.transcript))
-        # Track which question to ask next
-        next_index = len(qa_pairs)
+        # Separate consent from question answers
+        answers = call.answers
+        consent_given = False
+        question_answers = []
+        if answers:
+            # First answer is always consent
+            consent_answer = answers[0].transcript.strip().lower() if answers[0].transcript else ""
+            consent_given = consent_answer in ["yes", "yeah", "yep", "sure", "ok", "okay"]
+            # All subsequent answers are for questions
+            question_answers = answers[1:]
         # If this is the start or after an answer
         if (call_status == "in-progress" and not speech_result and not digits) or speech_result:
             # Save answer if present
             if speech_result:
-                last_question = None
-                if call.answers:
-                    last_question = db.query(Question).filter(Question.id == call.answers[-1].question_id).first()
-                answer = Answer(call_id=call.id, question_id=last_question.id if last_question else None, transcript=speech_result)
-                db.add(answer)
-                db.commit()
-                qa_pairs.append((last_question.text if last_question else "", speech_result))
+                # If no answers yet, this is consent
+                if not answers:
+                    answer = Answer(call_id=call.id, question_id=None, transcript=speech_result)
+                    db.add(answer)
+                    db.commit()
+                # If consent already given, save as question answer
+                elif consent_given and len(question_answers) < len(question_texts):
+                    q_idx = len(question_answers)
+                    question = all_questions[q_idx]
+                    answer = Answer(call_id=call.id, question_id=question.id, transcript=speech_result)
+                    db.add(answer)
+                    db.commit()
+                    question_answers.append(answer)
             # If no questions, end
             if not question_texts:
                 response.say("No questions found for your role. Goodbye.")
                 response.hangup()
                 return Response(content=str(response), media_type="application/xml")
-            # If at start, or after consent, or in the middle of questions
-            if next_index == 0:
-                # LLM: greeting and consent
+            # If at start, ask for consent
+            if not answers:
                 system_prompt = get_hr_bot_system_prompt(candidate.name, question_texts)
-                messages = build_conversation_history(system_prompt, qa_pairs)
+                messages = build_conversation_history(system_prompt, [])
                 messages.append({
                     "role": "system",
                     "content": "Start the interview by greeting the candidate by name and asking if it's a good time to talk. Wait for a yes/no answer."
                 })
                 llm_response = query_llm(messages)
-                audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                 audio_path = f"media/{audio_filename}"
                 if not os.path.exists(audio_path):
                     generate_speech(llm_response, audio_path)
@@ -230,12 +238,12 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
                 return Response(content=str(response), media_type="application/xml")
             # If waiting for consent
-            elif next_index == 1 and qa_pairs[0][1]:
+            elif answers and not consent_given:
                 # Check if user said yes
-                if qa_pairs[0][1].strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
+                if answers[0].transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
                     # Ask first question
                     question = question_texts[0]
-                    audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                    audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                     audio_path = f"media/{audio_filename}"
                     if not os.path.exists(audio_path):
                         generate_speech(question, audio_path)
@@ -252,9 +260,10 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                     db.commit()
                     return Response(content=str(response), media_type="application/xml")
             # If in the middle of questions
-            elif next_index > 1 and next_index <= len(question_texts):
-                question = question_texts[next_index-1]
-                audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+            elif consent_given and len(question_answers) < len(question_texts):
+                q_idx = len(question_answers)
+                question = question_texts[q_idx]
+                audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                 audio_path = f"media/{audio_filename}"
                 if not os.path.exists(audio_path):
                     generate_speech(question, audio_path)
@@ -264,15 +273,15 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
                 return Response(content=str(response), media_type="application/xml")
             # If all questions answered
-            elif next_index > len(question_texts):
+            elif consent_given and len(question_answers) >= len(question_texts):
                 system_prompt = get_hr_bot_system_prompt(candidate.name, question_texts)
-                messages = build_conversation_history(system_prompt, qa_pairs)
+                messages = build_conversation_history(system_prompt, [(q.text, a.transcript) for q, a in zip(all_questions, question_answers)])
                 messages.append({
                     "role": "system",
                     "content": "Thank the candidate and end the interview."
                 })
                 llm_response = query_llm(messages)
-                audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                 audio_path = f"media/{audio_filename}"
                 if not os.path.exists(audio_path):
                     generate_speech(llm_response, audio_path)
