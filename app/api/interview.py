@@ -160,8 +160,10 @@ from voice_generator import generate_speech
 
 @router.post("/twilio/webhook")
 async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
+    import logging
     try:
         form = await request.form()
+        logging.info(f"Incoming /twilio/webhook form data: {dict(form)}")
         call_sid = form.get("CallSid")
         from_number = form.get("From")
         to_number = form.get("To")
@@ -170,15 +172,18 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         digits = form.get("Digits")
         call_status = form.get("CallStatus")
         event = form.get("Event")
+        logging.info(f"Webhook vars: call_sid={call_sid}, from={from_number}, to={to_number}, speech_result={speech_result}, digits={digits}, call_status={call_status}, event={event}")
 
         candidate = db.query(Candidate).filter(Candidate.phone == to_number).first()
         if not candidate:
+            logging.warning(f"Candidate not found for phone: {to_number}")
             response = VoiceResponse()
             response.say("Sorry, candidate not found. Goodbye.")
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
         call = db.query(Call).filter(Call.candidate_id == candidate.id, Call.status == "in_progress").order_by(Call.started_at.desc()).first()
         if not call:
+            logging.warning(f"Call not found for candidate_id: {candidate.id}")
             response = VoiceResponse()
             response.say("Sorry, call not found. Goodbye.")
             response.hangup()
@@ -192,13 +197,13 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         consent_given = False
         question_answers = []
         if answers:
-            # First answer is always consent
             consent_answer = answers[0].transcript.strip().lower() if answers[0].transcript else ""
             consent_given = consent_answer in ["yes", "yeah", "yep", "sure", "ok", "okay"]
-            # All subsequent answers are for questions
             question_answers = answers[1:]
+        logging.info(f"answers count: {len(answers) if answers else 0}, consent_given: {consent_given}, question_answers: {len(question_answers)}")
         # If this is the start or after an answer
         if (call_status == "in-progress" and not speech_result and not digits) or speech_result:
+            logging.info(f"Processing answer: speech_result={speech_result}")
             # Save answer if present
             if speech_result:
                 # If no answers yet, this is consent
@@ -216,11 +221,13 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                     question_answers.append(answer)
             # If no questions, end
             if not question_texts:
+                logging.info("No questions found for candidate role.")
                 response.say("No questions found for your role. Goodbye.")
                 response.hangup()
                 return Response(content=str(response), media_type="application/xml")
             # If at start, ask for consent
             if not answers:
+                logging.info("At start: asking for consent.")
                 system_prompt = get_hr_bot_system_prompt(candidate.name, question_texts)
                 messages = build_conversation_history(system_prompt, [])
                 messages.append({
@@ -246,6 +253,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 return Response(content=str(response), media_type="application/xml")
             # If waiting for consent
             elif answers and not consent_given:
+                logging.info(f"Waiting for consent, got: {answers[0].transcript if answers else None}")
                 # Check if user said yes
                 if answers[0].transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
                     # Ask first question
@@ -275,6 +283,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                     return Response(content=str(response), media_type="application/xml")
             # If in the middle of questions
             elif consent_given and len(question_answers) < len(question_texts):
+                logging.info(f"Asking question {len(question_answers)}: {question_texts[len(question_answers)]}")
                 q_idx = len(question_answers)
                 question = question_texts[q_idx]
                 audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
@@ -295,6 +304,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 return Response(content=str(response), media_type="application/xml")
             # If all questions answered
             elif consent_given and len(question_answers) >= len(question_texts):
+                logging.info("All questions answered, ending interview.")
                 system_prompt = get_hr_bot_system_prompt(candidate.name, question_texts)
                 messages = build_conversation_history(system_prompt, [(q.text, a.transcript) for q, a in zip(all_questions, question_answers)])
                 messages.append({
@@ -315,6 +325,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 db.commit()
                 return Response(content=str(response), media_type="application/xml")
         # Default: hang up
+        logging.info("Default: hanging up.")
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
     except Exception as e:
