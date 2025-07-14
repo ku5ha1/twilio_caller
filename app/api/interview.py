@@ -238,7 +238,12 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                 audio_path = f"media/{audio_filename}"
                 if not os.path.exists(audio_path):
-                    generate_speech(llm_response, audio_path)
+                    try:
+                        logging.info(f"About to generate speech: '{llm_response}' -> {audio_path}")
+                        generate_speech(llm_response, audio_path)
+                        logging.info(f"Generated speech file: {audio_path} (exists: {os.path.exists(audio_path)})")
+                    except Exception as e:
+                        logging.error(f"Error generating speech for '{llm_response}': {e}", exc_info=True)
                 TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                 TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
                 gather = Gather(
@@ -261,7 +266,12 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                     audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                     audio_path = f"media/{audio_filename}"
                     if not os.path.exists(audio_path):
-                        generate_speech(question, audio_path)
+                        try:
+                            logging.info(f"About to generate speech: '{question}' -> {audio_path}")
+                            generate_speech(question, audio_path)
+                            logging.info(f"Generated speech file: {audio_path} (exists: {os.path.exists(audio_path)})")
+                        except Exception as e:
+                            logging.error(f"Error generating speech for '{question}': {e}", exc_info=True)
                     TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                     TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
                     gather = Gather(
@@ -289,7 +299,12 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                 audio_path = f"media/{audio_filename}"
                 if not os.path.exists(audio_path):
-                    generate_speech(question, audio_path)
+                    try:
+                        logging.info(f"About to generate speech: '{question}' -> {audio_path}")
+                        generate_speech(question, audio_path)
+                        logging.info(f"Generated speech file: {audio_path} (exists: {os.path.exists(audio_path)})")
+                    except Exception as e:
+                        logging.error(f"Error generating speech for '{question}': {e}", exc_info=True)
                 TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                 TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
                 gather = Gather(
@@ -315,7 +330,12 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
                 audio_path = f"media/{audio_filename}"
                 if not os.path.exists(audio_path):
-                    generate_speech(llm_response, audio_path)
+                    try:
+                        logging.info(f"About to generate speech: '{llm_response}' -> {audio_path}")
+                        generate_speech(llm_response, audio_path)
+                        logging.info(f"Generated speech file: {audio_path} (exists: {os.path.exists(audio_path)})")
+                    except Exception as e:
+                        logging.error(f"Error generating speech for '{llm_response}': {e}", exc_info=True)
                 TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                 TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
                 response.play(f"{TWILIO_BASE_URL}/{audio_path}")
