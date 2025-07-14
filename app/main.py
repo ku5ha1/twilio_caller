@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from fastapi import Depends
 from sqlalchemy.exc import IntegrityError
 
-app = FastAPI()\
+app = FastAPI()
 templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(candidates_router)
