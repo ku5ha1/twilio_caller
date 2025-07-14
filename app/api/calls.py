@@ -23,7 +23,7 @@ def get_call(call_id: int, db: Session = Depends(get_db)):
 
 @router.post("/calls")
 def create_call(call: CallCreate, db: Session = Depends(get_db)):
-    db_call = Call(candidate_id=call.candidate_id, status=call.status)
+    db_call = Call(candidate_id=call.candidate_id, status="in_progress")
     db.add(db_call)
     db.commit()
     db.refresh(db_call)
