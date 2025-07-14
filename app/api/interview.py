@@ -153,6 +153,8 @@ def llm_next_question(
         return {"error": str(e)}
 
 
+import logging
+logging.basicConfig(level=logging.INFO)
 from app.models import Candidate, Call, Question
 from sqlalchemy.orm import Session
 from voice_generator import generate_speech
@@ -160,7 +162,7 @@ from voice_generator import generate_speech
 
 @router.post("/twilio/webhook")
 async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
-    import logging
+    logging.info("==== /twilio/webhook endpoint called ====")
     try:
         form = await request.form()
         logging.info(f"Incoming /twilio/webhook form data: {dict(form)}")
@@ -176,14 +178,14 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
 
         candidate = db.query(Candidate).filter(Candidate.phone == to_number).first()
         if not candidate:
-            logging.warning(f"Candidate not found for phone: {to_number}")
+            logging.warning("Early return: candidate not found")
             response = VoiceResponse()
             response.say("Sorry, candidate not found. Goodbye.")
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
         call = db.query(Call).filter(Call.candidate_id == candidate.id, Call.status == "in_progress").order_by(Call.started_at.desc()).first()
         if not call:
-            logging.warning(f"Call not found for candidate_id: {candidate.id}")
+            logging.warning("Early return: call not found")
             response = VoiceResponse()
             response.say("Sorry, call not found. Goodbye.")
             response.hangup()
