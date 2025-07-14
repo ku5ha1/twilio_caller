@@ -165,82 +165,88 @@ from voice_generator import generate_speech
 
 @router.post("/twilio/webhook")
 async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
-    form = await request.form()
-    call_sid = form.get("CallSid")
-    from_number = form.get("From")
-    to_number = form.get("To")
-    print(f"to_number: {to_number}")
-    speech_result = form.get("SpeechResult")
-    digits = form.get("Digits")
-    call_status = form.get("CallStatus")
-    event = form.get("Event")
+    try:
+        form = await request.form()
+        call_sid = form.get("CallSid")
+        from_number = form.get("From")
+        to_number = form.get("To")
+        print(f"to_number: {to_number}")
+        speech_result = form.get("SpeechResult")
+        digits = form.get("Digits")
+        call_status = form.get("CallStatus")
+        event = form.get("Event")
 
-    candidate = db.query(Candidate).filter(Candidate.phone == to_number).first()
-    if not candidate:
-        response = VoiceResponse()
-        response.say("Sorry, candidate not found. Goodbye.")
-        response.hangup()
-        return Response(content=str(response), media_type="application/xml")
-    call = db.query(Call).filter(Call.candidate_id == candidate.id, Call.status == "in_progress").order_by(Call.started_at.desc()).first()
-    if not call:
-        response = VoiceResponse()
-        response.say("Sorry, call not found. Goodbye.")
-        response.hangup()
-        return Response(content=str(response), media_type="application/xml")
-
-    response = VoiceResponse()
-
-    # If this is the start of the call, play the first question
-    if call_status == "in-progress" and not speech_result and not digits:
-        question = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).first()
-        if not question:
-            response.say("No questions found for your role. Goodbye.")
+        candidate = db.query(Candidate).filter(Candidate.phone == to_number).first()
+        if not candidate:
+            response = VoiceResponse()
+            response.say("Sorry, candidate not found. Goodbye.")
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
-        audio_filename = f"question_{question.id}_tts.mp3"
-        audio_path = f"media/{audio_filename}"
-        if not os.path.exists(audio_path):
-            generate_speech(question.text, audio_path)
-        TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
-        TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
-        response.play(f"{TWILIO_BASE_URL}/{audio_path}")
-        response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
-        return Response(content=str(response), media_type="application/xml")
+        call = db.query(Call).filter(Call.candidate_id == candidate.id, Call.status == "in_progress").order_by(Call.started_at.desc()).first()
+        if not call:
+            response = VoiceResponse()
+            response.say("Sorry, call not found. Goodbye.")
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml")
 
-    # If we received a speech result (answer)
-    if speech_result:
-        # Store the answer
-        last_question = db.query(Question).filter(Question.id == call.answers[-1].question_id).first() if call.answers else None
-        answer = Answer(call_id=call.id, question_id=last_question.id if last_question else None, transcript=speech_result)
-        db.add(answer)
-        db.commit()
-        # Find the next question
-        all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
-        asked_ids = [ans.question_id for ans in call.answers]
-        remaining_questions = [q for q in all_questions if q.id not in asked_ids]
-        if remaining_questions:
-            next_q = remaining_questions[0]
-            audio_filename = f"question_{next_q.id}_tts.mp3"
+        response = VoiceResponse()
+
+        # If this is the start of the call, play the first question
+        if call_status == "in-progress" and not speech_result and not digits:
+            question = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).first()
+            if not question:
+                response.say("No questions found for your role. Goodbye.")
+                response.hangup()
+                return Response(content=str(response), media_type="application/xml")
+            audio_filename = f"question_{question.id}_tts.mp3"
             audio_path = f"media/{audio_filename}"
             if not os.path.exists(audio_path):
-                generate_speech(next_q.text, audio_path)
+                generate_speech(question.text, audio_path)
             TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
             TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
             response.play(f"{TWILIO_BASE_URL}/{audio_path}")
             response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
             return Response(content=str(response), media_type="application/xml")
-        else:
-            response.say("Thank you for your time. Goodbye!")
-            response.hangup()
-            call.status = "completed"
-            call.completed_at = datetime.datetime.utcnow()
-            db.commit()
-            return Response(content=str(response), media_type="application/xml")
 
-    # Default: hang up
-    response.say("Thank you. Goodbye!")
-    response.hangup()
-    return Response(content=str(response), media_type="application/xml") 
+        # If we received a speech result (answer)
+        if speech_result:
+            # Store the answer
+            last_question = db.query(Question).filter(Question.id == call.answers[-1].question_id).first() if call.answers else None
+            answer = Answer(call_id=call.id, question_id=last_question.id if last_question else None, transcript=speech_result)
+            db.add(answer)
+            db.commit()
+            # Find the next question
+            all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
+            asked_ids = [ans.question_id for ans in call.answers]
+            remaining_questions = [q for q in all_questions if q.id not in asked_ids]
+            if remaining_questions:
+                next_q = remaining_questions[0]
+                audio_filename = f"question_{next_q.id}_tts.mp3"
+                audio_path = f"media/{audio_filename}"
+                if not os.path.exists(audio_path):
+                    generate_speech(next_q.text, audio_path)
+                TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
+                TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                return Response(content=str(response), media_type="application/xml")
+            else:
+                response.say("Thank you for your time. Goodbye!")
+                response.hangup()
+                call.status = "completed"
+                call.completed_at = datetime.datetime.utcnow()
+                db.commit()
+                return Response(content=str(response), media_type="application/xml")
+
+        # Default: hang up
+        response.say("Thank you. Goodbye!")
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml")
+    except Exception as e:
+        response = VoiceResponse()
+        response.say("An unexpected error occurred. Goodbye.")
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml")
 
 @router.post("/twilio/call")
 def initiate_twilio_call(candidate_id: int, db: Session = Depends(get_db)):
