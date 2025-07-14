@@ -5,7 +5,6 @@ from app.schemas import AnswerCreate
 from app.dependencies import get_db
 from typing import Optional, List, Tuple
 import datetime
-
 import os
 import requests
 import logging
@@ -178,10 +177,16 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
 
     candidate = db.query(Candidate).filter(Candidate.phone == to_number).first()
     if not candidate:
-        return JSONResponse(status_code=404, content={"error": "Candidate not found"})
+        response = VoiceResponse()
+        response.say("Sorry, candidate not found. Goodbye.")
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml")
     call = db.query(Call).filter(Call.candidate_id == candidate.id, Call.status == "in_progress").order_by(Call.started_at.desc()).first()
     if not call:
-        return JSONResponse(status_code=404, content={"error": "Call not found"})
+        response = VoiceResponse()
+        response.say("Sorry, call not found. Goodbye.")
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml")
 
     response = VoiceResponse()
 
