@@ -46,17 +46,12 @@ def query_llm(messages, model="gpt-3.5-turbo", temperature=0.7):
 
 # --- HR Bot Prompt Engineering ---
 
-def get_hr_bot_system_prompt():
-    """
-    Returns the system prompt for the HR interview bot persona.
-    """
+def get_hr_bot_system_prompt(candidate_name, questions):
     return (
-        "You are an automated HR interviewer. "
-        "You are friendly, professional, and concise. "
-        "Your job is to screen candidates for specific roles by asking predefined questions, "
-        "extracting key information, and following up for clarification if needed. "
-        "Do not answer on behalf of the candidate. Only ask questions or acknowledge their responses. "
-        "If a candidate is not a fit, politely end the interview."
+        f"You are an automated HR interviewer named DigiBot. Greet the candidate by name (e.g., 'Hello {candidate_name}, this is DigiBot from Digi9, Bangalore.'). "
+        "Ask if it's a good time to talk. If yes, proceed to ask the following questions, one by one, in order. "
+        "Do not ask any questions not in this list. After all questions are answered, thank the candidate and end the interview. "
+        f"Here are the questions: {' | '.join(questions)}"
     )
 
 
@@ -190,18 +185,18 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
             return Response(content=str(response), media_type="application/xml")
 
         response = VoiceResponse()
-        # Fetch all questions for the candidate's role
         all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
         question_texts = [q.text for q in all_questions]
-        # Build conversation history from answers
         qa_pairs = []
         for ans in call.answers:
             q = db.query(Question).filter(Question.id == ans.question_id).first()
             if q:
                 qa_pairs.append((q.text, ans.transcript))
-        # If this is the start of the call, or after an answer, get next LLM response
+        # Track which question to ask next
+        next_index = len(qa_pairs)
+        # If this is the start or after an answer
         if (call_status == "in-progress" and not speech_result and not digits) or speech_result:
-            # If we just got an answer, store it
+            # Save answer if present
             if speech_result:
                 last_question = None
                 if call.answers:
@@ -210,30 +205,85 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 db.add(answer)
                 db.commit()
                 qa_pairs.append((last_question.text if last_question else "", speech_result))
-            # Use LLM to get next message (greeting, question, or closing)
-            system_prompt = get_hr_bot_system_prompt() + f" The candidate is applying for the role: {candidate.role}. Here are the questions you should ask: " + " ".join(question_texts)
-            messages = build_conversation_history(system_prompt, qa_pairs)
-            messages.append({
-                "role": "system",
-                "content": "Continue the interview. If the interview is complete, say 'Interview complete.' Otherwise, respond with the next thing you would say to the candidate (greeting, question, or closing)."
-            })
-            llm_response = query_llm(messages)
-            if llm_response.strip().lower() == "interview complete.":
+            # If no questions, end
+            if not question_texts:
+                response.say("No questions found for your role. Goodbye.")
+                response.hangup()
+                return Response(content=str(response), media_type="application/xml")
+            # If at start, or after consent, or in the middle of questions
+            if next_index == 0:
+                # LLM: greeting and consent
+                system_prompt = get_hr_bot_system_prompt(candidate.name, question_texts)
+                messages = build_conversation_history(system_prompt, qa_pairs)
+                messages.append({
+                    "role": "system",
+                    "content": "Start the interview by greeting the candidate by name and asking if it's a good time to talk. Wait for a yes/no answer."
+                })
+                llm_response = query_llm(messages)
+                audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                audio_path = f"media/{audio_filename}"
+                if not os.path.exists(audio_path):
+                    generate_speech(llm_response, audio_path)
+                TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
+                TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                return Response(content=str(response), media_type="application/xml")
+            # If waiting for consent
+            elif next_index == 1 and qa_pairs[0][1]:
+                # Check if user said yes
+                if qa_pairs[0][1].strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
+                    # Ask first question
+                    question = question_texts[0]
+                    audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                    audio_path = f"media/{audio_filename}"
+                    if not os.path.exists(audio_path):
+                        generate_speech(question, audio_path)
+                    TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
+                    TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+                    response.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                    response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                    return Response(content=str(response), media_type="application/xml")
+                else:
+                    response.say("Thank you. We will reach out another time. Goodbye.")
+                    response.hangup()
+                    call.status = "completed"
+                    call.completed_at = datetime.datetime.utcnow()
+                    db.commit()
+                    return Response(content=str(response), media_type="application/xml")
+            # If in the middle of questions
+            elif next_index > 1 and next_index <= len(question_texts):
+                question = question_texts[next_index-1]
+                audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                audio_path = f"media/{audio_filename}"
+                if not os.path.exists(audio_path):
+                    generate_speech(question, audio_path)
+                TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
+                TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                return Response(content=str(response), media_type="application/xml")
+            # If all questions answered
+            elif next_index > len(question_texts):
+                system_prompt = get_hr_bot_system_prompt(candidate.name, question_texts)
+                messages = build_conversation_history(system_prompt, qa_pairs)
+                messages.append({
+                    "role": "system",
+                    "content": "Thank the candidate and end the interview."
+                })
+                llm_response = query_llm(messages)
+                audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
+                audio_path = f"media/{audio_filename}"
+                if not os.path.exists(audio_path):
+                    generate_speech(llm_response, audio_path)
+                TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
+                TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
+                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                response.hangup()
                 call.status = "completed"
                 call.completed_at = datetime.datetime.utcnow()
                 db.commit()
-                response.hangup()
                 return Response(content=str(response), media_type="application/xml")
-            # Generate and play the LLM's response (greeting, question, or closing)
-            audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
-            audio_path = f"media/{audio_filename}"
-            if not os.path.exists(audio_path):
-                generate_speech(llm_response, audio_path)
-            TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
-            TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
-            response.play(f"{TWILIO_BASE_URL}/{audio_path}")
-            response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
-            return Response(content=str(response), media_type="application/xml")
         # Default: hang up
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
