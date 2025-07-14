@@ -234,8 +234,15 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                     generate_speech(llm_response, audio_path)
                 TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                 TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
-                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
-                response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                gather = Gather(
+                    input="speech dtmf",
+                    timeout=5,
+                    speechTimeout="auto",
+                    action=TWILIO_WEBHOOK_URL,
+                    method="POST"
+                )
+                gather.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                response.append(gather)
                 return Response(content=str(response), media_type="application/xml")
             # If waiting for consent
             elif answers and not consent_given:
@@ -249,8 +256,15 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                         generate_speech(question, audio_path)
                     TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                     TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
-                    response.play(f"{TWILIO_BASE_URL}/{audio_path}")
-                    response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                    gather = Gather(
+                        input="speech dtmf",
+                        timeout=5,
+                        speechTimeout="auto",
+                        action=TWILIO_WEBHOOK_URL,
+                        method="POST"
+                    )
+                    gather.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                    response.append(gather)
                     return Response(content=str(response), media_type="application/xml")
                 else:
                     response.say("Thank you. We will reach out another time. Goodbye.")
@@ -269,8 +283,15 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                     generate_speech(question, audio_path)
                 TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
                 TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
-                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
-                response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
+                gather = Gather(
+                    input="speech dtmf",
+                    timeout=5,
+                    speechTimeout="auto",
+                    action=TWILIO_WEBHOOK_URL,
+                    method="POST"
+                )
+                gather.play(f"{TWILIO_BASE_URL}/{audio_path}")
+                response.append(gather)
                 return Response(content=str(response), media_type="application/xml")
             # If all questions answered
             elif consent_given and len(question_answers) >= len(question_texts):
