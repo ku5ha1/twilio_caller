@@ -199,9 +199,19 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         consent_given = False
         question_answers = []
         if answers:
-            consent_answer = answers[0].transcript.strip().lower() if answers[0].transcript else ""
-            consent_given = consent_answer in ["yes", "yeah", "yep", "sure", "ok", "okay"]
-            question_answers = answers[1:]
+            # Check all answers for consent, or just the latest if still waiting for consent
+            consent_answer = ""
+            for a in answers:
+                if a.transcript and a.transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
+                    consent_answer = a.transcript.strip().lower()
+                    break
+            consent_given = bool(consent_answer)
+            # All answers after the first consent are question answers
+            if consent_given:
+                consent_index = next(i for i, a in enumerate(answers) if a.transcript and a.transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"])
+                question_answers = answers[consent_index+1:]
+            else:
+                question_answers = []
         logging.info(f"answers count: {len(answers) if answers else 0}, consent_given: {consent_given}, question_answers: {len(question_answers)}")
         # If this is the start or after an answer
         if (call_status == "in-progress" and not speech_result and not digits) or speech_result:
