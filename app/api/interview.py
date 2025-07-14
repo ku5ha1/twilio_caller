@@ -190,56 +190,51 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
             return Response(content=str(response), media_type="application/xml")
 
         response = VoiceResponse()
-
-        # If this is the start of the call, play the first question
-        if call_status == "in-progress" and not speech_result and not digits:
-            question = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).first()
-            if not question:
-                response.say("No questions found for your role. Goodbye.")
+        # Fetch all questions for the candidate's role
+        all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
+        question_texts = [q.text for q in all_questions]
+        # Build conversation history from answers
+        qa_pairs = []
+        for ans in call.answers:
+            q = db.query(Question).filter(Question.id == ans.question_id).first()
+            if q:
+                qa_pairs.append((q.text, ans.transcript))
+        # If this is the start of the call, or after an answer, get next LLM response
+        if (call_status == "in-progress" and not speech_result and not digits) or speech_result:
+            # If we just got an answer, store it
+            if speech_result:
+                last_question = None
+                if call.answers:
+                    last_question = db.query(Question).filter(Question.id == call.answers[-1].question_id).first()
+                answer = Answer(call_id=call.id, question_id=last_question.id if last_question else None, transcript=speech_result)
+                db.add(answer)
+                db.commit()
+                qa_pairs.append((last_question.text if last_question else "", speech_result))
+            # Use LLM to get next message (greeting, question, or closing)
+            system_prompt = get_hr_bot_system_prompt() + f" The candidate is applying for the role: {candidate.role}. Here are the questions you should ask: " + " ".join(question_texts)
+            messages = build_conversation_history(system_prompt, qa_pairs)
+            messages.append({
+                "role": "system",
+                "content": "Continue the interview. If the interview is complete, say 'Interview complete.' Otherwise, respond with the next thing you would say to the candidate (greeting, question, or closing)."
+            })
+            llm_response = query_llm(messages)
+            if llm_response.strip().lower() == "interview complete.":
+                call.status = "completed"
+                call.completed_at = datetime.datetime.utcnow()
+                db.commit()
                 response.hangup()
                 return Response(content=str(response), media_type="application/xml")
-            audio_filename = f"question_{question.id}_tts.mp3"
+            # Generate and play the LLM's response (greeting, question, or closing)
+            audio_filename = f"llm_message_{len(call.answers)+1}_tts.mp3"
             audio_path = f"media/{audio_filename}"
             if not os.path.exists(audio_path):
-                generate_speech(question.text, audio_path)
-            TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
+                generate_speech(llm_response, audio_path)
+            TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]
             TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
             response.play(f"{TWILIO_BASE_URL}/{audio_path}")
             response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
             return Response(content=str(response), media_type="application/xml")
-
-        # If we received a speech result (answer)
-        if speech_result:
-            # Store the answer
-            last_question = db.query(Question).filter(Question.id == call.answers[-1].question_id).first() if call.answers else None
-            answer = Answer(call_id=call.id, question_id=last_question.id if last_question else None, transcript=speech_result)
-            db.add(answer)
-            db.commit()
-            # Find the next question
-            all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
-            asked_ids = [ans.question_id for ans in call.answers]
-            remaining_questions = [q for q in all_questions if q.id not in asked_ids]
-            if remaining_questions:
-                next_q = remaining_questions[0]
-                audio_filename = f"question_{next_q.id}_tts.mp3"
-                audio_path = f"media/{audio_filename}"
-                if not os.path.exists(audio_path):
-                    generate_speech(next_q.text, audio_path)
-                TWILIO_WEBHOOK_URL = os.environ["TWILIO_WEBHOOK_URL"]  # Will raise KeyError if not set
-                TWILIO_BASE_URL = TWILIO_WEBHOOK_URL.split("/twilio/webhook")[0]
-                response.play(f"{TWILIO_BASE_URL}/{audio_path}")
-                response.gather(input="speech dtmf", timeout=5, speechTimeout="auto", action="/twilio/webhook", method="POST")
-                return Response(content=str(response), media_type="application/xml")
-            else:
-                response.say("Thank you for your time. Goodbye!")
-                response.hangup()
-                call.status = "completed"
-                call.completed_at = datetime.datetime.utcnow()
-                db.commit()
-                return Response(content=str(response), media_type="application/xml")
-
         # Default: hang up
-        response.say("Thank you. Goodbye!")
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
     except Exception as e:
