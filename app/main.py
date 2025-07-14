@@ -24,8 +24,6 @@ app.include_router(calls_router)
 app.include_router(answers_router)
 app.include_router(tts_router)
 app.include_router(interview_router)
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-templates = Jinja2Templates(directory="app/templates")
 
 @app.get("/health")
 def health_check():
