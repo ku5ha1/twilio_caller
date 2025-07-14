@@ -170,6 +170,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
     call_sid = form.get("CallSid")
     from_number = form.get("From")
     to_number = form.get("To")
+    print(f"to_number: {to_number}")
     speech_result = form.get("SpeechResult")
     digits = form.get("Digits")
     call_status = form.get("CallStatus")
