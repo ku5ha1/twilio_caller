@@ -8,9 +8,6 @@ from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from voice_generator import generate_speech
 from dotenv import load_dotenv
-import os
-
-os.makedirs("media", exist_ok=True)
 
 load_dotenv()
 
