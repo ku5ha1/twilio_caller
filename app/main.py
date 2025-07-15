@@ -10,6 +10,7 @@ from twilio.twiml.voice_response import VoiceResponse, Gather
 from voice_generator import generate_speech
 from dotenv import load_dotenv
 import re
+from fastapi.staticfiles import StaticFiles
 
 # os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -27,6 +28,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Mount media directory for static file serving
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # HR and Interview Config
 HR_NAME = "Sanskriti"
@@ -334,7 +338,7 @@ async def twilio_webhook(request: Request):
                         action=f"/twilio/webhook?candidate_name={candidate_name}",
                         method="POST"
                     )
-                    gather.play(audio_filename)
+                    gather.play(f"/media/{os.path.basename(audio_filename)}")
                     response.append(gather)
                 else:
                     gather = Gather(
@@ -371,7 +375,7 @@ async def twilio_webhook(request: Request):
                                 action=f"/twilio/webhook?candidate_name={candidate_name}",
                                 method="POST"
                             )
-                            gather.play(audio_filename)
+                            gather.play(f"/media/{os.path.basename(audio_filename)}")
                             response.append(gather)
                         else:
                             gather = Gather(
@@ -427,7 +431,7 @@ async def twilio_webhook(request: Request):
                         action=f"/twilio/webhook?candidate_name={candidate_name}",
                         method="POST"
                     )
-                    gather.play(audio_filename)
+                    gather.play(f"/media/{os.path.basename(audio_filename)}")
                     response.append(gather)
                 else:
                     gather = Gather(
@@ -513,7 +517,7 @@ def get_candidate_data(candidate_id: str):
         data = load_candidate_data(normalized_id)
         if data:
             return data
-        else:
+            else:
             return JSONResponse(status_code=404, content={"error": "Candidate not found"})
     except Exception as e:
         logger.error(f"Error retrieving candidate data: {str(e)}")
