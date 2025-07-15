@@ -230,42 +230,204 @@ class CallRequest(BaseModel):
     candidate_number: str
 
 
-@app.post("/test-call")
-def test_call():
-    """Simple test endpoint with hardcoded values"""
+@app.post("/twilio/webhook")
+async def twilio_webhook(request: Request):
     try:
-        # Hardcoded test values - modify these for your testing
-        test_candidate_name = "John Doe"
-        test_candidate_number = "+1234567890"  # Replace with your actual test number
-        
-        logger.info(f"TEST: Initiating test call to {test_candidate_name} at {test_candidate_number}")
-        
-        validate_environment()
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        
-        call = client.calls.create(
-            to=test_candidate_number,
-            from_=TWILIO_PHONE_NUMBER,
-            url=TWILIO_WEBHOOK_URL + f"?candidate_name={test_candidate_name}"
-        )
-        
-        logger.info(f"TEST: Call initiated successfully. Call SID: {call.sid}")
-        return {
-            "status": "test_call_initiated", 
-            "call_sid": call.sid,
-            "test_candidate_name": test_candidate_name,
-            "test_candidate_number": test_candidate_number,
-            "message": "Test call initiated with hardcoded values"
-        }
-        
+        form = await request.form()
+        candidate_name = sanitize_candidate_name(request.query_params.get("candidate_name", "Candidate"))
+        speech_result = form.get("SpeechResult", "").strip()
+        call_status = form.get("CallStatus")
+        candidate_id = normalize_candidate_id(form.get("To", ""))
+        candidate_data = load_candidate_data(candidate_id)
+        consent_given, answered_count = get_interview_state(candidate_data)
+        response = VoiceResponse()
+
+        # FIRST-TIME CALL HANDLING (no speech check yet)
+        if not speech_result and not candidate_data.get("_prompted"):
+            logger.info("Initial call greeting")
+            candidate_data["_prompted"] = True
+            save_candidate_data(candidate_id, candidate_data)
+            greet = f"Hello {candidate_name}, this is {HR_NAME} from Digi9. Is this a good time to talk?"
+            gather = Gather(
+                input="speech",
+                timeout=10,  # 10 sec to start speaking
+                speechTimeout=3,  # 3 sec silence ends
+                language="en-IN",
+                action=f"/twilio/webhook?candidate_name={candidate_name}",
+                method="POST"
+            )
+            gather.say(greet)
+            response.append(gather)
+            return Response(content=str(response), media_type="application/xml")
+
+        # SILENT RESPONSE HANDLING (only after first prompt)
+        if not speech_result and candidate_data.get("_prompted"):
+            logger.warning("No response detected - retrying once")
+            if not candidate_data.get("_retried"):
+                candidate_data["_retried"] = True
+                save_candidate_data(candidate_id, candidate_data)
+                retry_prompt = "We didn't hear your response. Please answer verbally after the beep."
+                gather = Gather(
+                    input="speech",
+                    timeout=10,
+                    speechTimeout=3,
+                    language="en-IN",
+                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    method="POST"
+                )
+                gather.say(retry_prompt)
+                gather.play("https://twimlets.com/holdmusic?Bucket=com.twilio.music.ambient")  # Add beep sound
+                response.append(gather)
+            else:
+                response.say("We're having trouble hearing you. Please call back later.")
+                response.hangup()
+            return Response(content=str(response), media_type="application/xml")
+
+        # INTERVIEW FLOW
+        # 1. Consent not yet given: process consent
+        if not consent_given:
+            if llm_judge_consent(speech_result):
+                candidate_data["consent"] = True
+                candidate_data["consent_response"] = speech_result
+                save_candidate_data(candidate_id, candidate_data)
+                # Ask first question
+                question_num = 0
+                question = BDE_QUESTIONS[question_num]
+                gather = Gather(
+                    input="speech",
+                    timeout=INPUT_TIMEOUT,
+                    speechTimeout=SPEECH_TIMEOUT,
+                    language=LANGUAGE,
+                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    method="POST"
+                )
+                gather.say(f"Thank you. Let's begin the interview. {question}")
+                response.append(gather)
+                return Response(content=str(response), media_type="application/xml")
+            else:
+                candidate_data["consent"] = False
+                candidate_data["consent_response"] = speech_result
+                save_candidate_data(candidate_id, candidate_data)
+                response.say("Thank you for your response. We will reach out at a better time. Goodbye.")
+                response.hangup()
+                return Response(content=str(response), media_type="application/xml")
+
+        # 2. Consent given: ask next question or save answer
+        if consent_given:
+            # If all questions answered, end call
+            if answered_count >= len(BDE_QUESTIONS):
+                if not candidate_data.get("interview_completed"):
+                    candidate_data["interview_completed"] = True
+                    candidate_data["completion_time"] = datetime.now().isoformat()
+                    save_candidate_data(candidate_id, candidate_data)
+                response.say("Thank you for answering all the questions. We will get back to you soon. Goodbye.")
+                response.hangup()
+                return Response(content=str(response), media_type="application/xml")
+
+            # Save answer to previous question (if not first question)
+            if answered_count > 0 and speech_result:
+                candidate_data[f"Q{answered_count}"] = speech_result
+                save_candidate_data(candidate_id, candidate_data)
+                answered_count += 1
+
+            # Ask next question if any left
+            if answered_count < len(BDE_QUESTIONS):
+                question = BDE_QUESTIONS[answered_count]
+                gather = Gather(
+                    input="speech",
+                    timeout=INPUT_TIMEOUT,
+                    speechTimeout=SPEECH_TIMEOUT,
+                    language=LANGUAGE,
+                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    method="POST"
+                )
+                gather.say(question)
+                response.append(gather)
+                return Response(content=str(response), media_type="application/xml")
+
     except Exception as e:
-        logger.error(f"TEST: Error initiating test call: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": str(e), "message": "Test call failed"})
+        logger.error(f"Webhook error: {str(e)}")
+        response = VoiceResponse()
+        response.say("Technical error occurred. Goodbye.")
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml")
 
+# --- Refactor: Remove commented-out code and add production flag for test endpoints ---
 
+# Set this to False before deploying to production
+ENABLE_TEST_ENDPOINTS = True
+
+if ENABLE_TEST_ENDPOINTS:
+    @app.post("/test-call")
+    def test_call():
+        """Simple test endpoint with hardcoded values"""
+        try:
+            # Hardcoded test values - modify these for your testing
+            test_candidate_name = "John Doe"
+            test_candidate_number = "+1234567890"  # Replace with your actual test number
+            
+            logger.info(f"TEST: Initiating test call to {test_candidate_name} at {test_candidate_number}")
+            
+            validate_environment()
+            client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            
+            call = client.calls.create(
+                to=test_candidate_number,
+                from_=TWILIO_PHONE_NUMBER,
+                url=TWILIO_WEBHOOK_URL + f"?candidate_name={test_candidate_name}"
+            )
+            
+            logger.info(f"TEST: Call initiated successfully. Call SID: {call.sid}")
+            return {
+                "status": "test_call_initiated", 
+                "call_sid": call.sid,
+                "test_candidate_name": test_candidate_name,
+                "test_candidate_number": test_candidate_number,
+                "message": "Test call initiated with hardcoded values"
+            }
+            
+        except Exception as e:
+            logger.error(f"TEST: Error initiating test call: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": str(e), "message": "Test call failed"})
+
+    @app.get("/test-data/{candidate_id}")
+    def get_test_data(candidate_id: str):
+        """Get test candidate data with enhanced formatting"""
+        try:
+            data = load_candidate_data(candidate_id)
+            if data:
+                # Format for better readability during testing
+                formatted_data = {
+                    "candidate_id": candidate_id,
+                    "consent_given": data.get("consent", False),
+                    "consent_response": data.get("consent_response", ""),
+                    "interview_completed": data.get("interview_completed", False),
+                    "completion_time": data.get("completion_time", ""),
+                    "last_updated": data.get("last_updated", ""),
+                    "answers": {}
+                }
+                
+                # Format questions and answers nicely
+                for i in range(1, len(BDE_QUESTIONS) + 1):
+                    question_key = f"Q{i}"
+                    if question_key in data:
+                        formatted_data["answers"][f"Question {i}"] = {
+                            "question": BDE_QUESTIONS[i-1],
+                            "answer": data[question_key]
+                        }
+                
+                return formatted_data
+            else:
+                return JSONResponse(status_code=404, content={"error": "Test candidate not found"})
+        except Exception as e:
+            logger.error(f"Error retrieving test candidate data: {str(e)}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+# /call endpoint: require request body in production
 @app.post("/call")
 def initiate_call(req: CallRequest = None):
-    """Initiate call with enhanced error handling - supports hardcoded testing"""
+    if not ENABLE_TEST_ENDPOINTS and req is None:
+        return JSONResponse(status_code=400, content={"error": "Request body required in production."})
     try:
         validate_environment()
         
@@ -302,99 +464,6 @@ def initiate_call(req: CallRequest = None):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-@app.post("/twilio/webhook")
-async def twilio_webhook(request: Request):
-    try:
-        form = await request.form()
-        candidate_name = sanitize_candidate_name(request.query_params.get("candidate_name", "Candidate"))
-        speech_result = form.get("SpeechResult", "").strip()
-        
-        candidate_id = normalize_candidate_id(form.get("To", ""))
-        candidate_data = load_candidate_data(candidate_id)
-        consent_given, answered_count = get_interview_state(candidate_data)
-        
-        response = VoiceResponse()
-
-        # Handle silent responses
-        if not speech_result and "Digits" not in form:
-            logger.warning("No speech detected - reprompting")
-            response.say("We didn't hear your response. Please answer verbally.")
-            response.redirect(f"/twilio/webhook?candidate_name={candidate_name}")
-            return Response(content=str(response), media_type="application/xml")
-
-        if not consent_given:
-            if not speech_result:
-                # Consent request with enhanced settings
-                greet = f"Hello {candidate_name}, this is {HR_NAME} from Digi9. Is this a good time to talk?"
-                gather = Gather(
-                    input="speech",
-                    timeout=INPUT_TIMEOUT,
-                    speechTimeout=SPEECH_TIMEOUT,
-                    language=LANGUAGE,
-                    action=f"/twilio/webhook?candidate_name={candidate_name}",
-                    method="POST"
-                )
-                gather.say(greet)
-                response.append(gather)
-            else:
-                # Process consent response
-                if llm_judge_consent(speech_result):
-                    candidate_data["consent"] = True
-                    save_candidate_data(candidate_id, candidate_data)
-                    
-                    # Ask first question
-                    question = BDE_QUESTIONS[0]
-                    gather = Gather(
-                        input="speech",
-                        timeout=INPUT_TIMEOUT,
-                        speechTimeout=SPEECH_TIMEOUT,
-                        language=LANGUAGE,
-                        action=f"/twilio/webhook?candidate_name={candidate_name}",
-                        method="POST"
-                    )
-                    gather.say(question)
-                    response.append(gather)
-                else:
-                    response.say("Thank you for your time. Goodbye.")
-                    response.hangup()
-        
-        else:
-            # Interview questions flow (same as before but with new timeouts)
-            if speech_result:
-                save_answer(candidate_id, answered_count, speech_result)
-                
-            if answered_count < len(BDE_QUESTIONS):
-                question = BDE_QUESTIONS[answered_count]
-                gather = Gather(
-                    input="speech",
-                    timeout=INPUT_TIMEOUT,
-                    speechTimeout=SPEECH_TIMEOUT,
-                    language=LANGUAGE,
-                    action=f"/twilio/webhook?candidate_name={candidate_name}",
-                    method="POST"
-                )
-                gather.say(question)
-                response.append(gather)
-            else:
-                response.say("Interview completed. Thank you!")
-                response.hangup()
-
-        return Response(content=str(response), media_type="application/xml")
-
-    except Exception as e:
-        logger.error(f"Webhook error: {str(e)}")
-        response = VoiceResponse()
-        response.say("Technical error occurred. Please call back later.")
-        response.hangup()
-        return Response(content=str(response), media_type="application/xml")
-
-# Helper function to save answers
-def save_answer(candidate_id, question_num, answer):
-    data = load_candidate_data(candidate_id)
-    data[f"Q{question_num+1}"] = answer
-    save_candidate_data(candidate_id, data)
-
-
 @app.get("/health")
 def health_check():
     """Health check endpoint"""
@@ -404,40 +473,6 @@ def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
         return JSONResponse(status_code=500, content={"status": "unhealthy", "error": str(e)})
-
-
-@app.get("/test-data/{candidate_id}")
-def get_test_data(candidate_id: str):
-    """Get test candidate data with enhanced formatting"""
-    try:
-        data = load_candidate_data(candidate_id)
-        if data:
-            # Format for better readability during testing
-            formatted_data = {
-                "candidate_id": candidate_id,
-                "consent_given": data.get("consent", False),
-                "consent_response": data.get("consent_response", ""),
-                "interview_completed": data.get("interview_completed", False),
-                "completion_time": data.get("completion_time", ""),
-                "last_updated": data.get("last_updated", ""),
-                "answers": {}
-            }
-            
-            # Format questions and answers nicely
-            for i in range(1, len(BDE_QUESTIONS) + 1):
-                question_key = f"Q{i}"
-                if question_key in data:
-                    formatted_data["answers"][f"Question {i}"] = {
-                        "question": BDE_QUESTIONS[i-1],
-                        "answer": data[question_key]
-                    }
-            
-            return formatted_data
-        else:
-            return JSONResponse(status_code=404, content={"error": "Test candidate not found"})
-    except Exception as e:
-        logger.error(f"Error retrieving test candidate data: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/candidate/{candidate_id}")
