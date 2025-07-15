@@ -264,7 +264,7 @@ async def twilio_webhook(request: Request):
                 timeout=10,
                 speechTimeout=5,  # Increased pause time
                 language="en-US",  # Improved recognition
-                # action=f"/twilio/webhook?candidate_name={candidate_name}",  # Temporarily removed for test
+                action=f"/twilio/webhook?candidate_name={candidate_name}",  # Temporarily removed for test
                 method="POST"
             )
             gather.say(greet)
