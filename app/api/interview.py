@@ -161,6 +161,19 @@ from sqlalchemy.orm import Session
 from voice_generator import generate_speech
 
 
+def llm_judge_consent(user_response):
+    prompt = (
+        f"The candidate was asked if this is a good time to talk. "
+        f"Their response was: '{user_response}'. "
+        "Should the interview proceed? Reply only with 'yes' or 'no'."
+    )
+    messages = [
+        {"role": "system", "content": "You are an HR assistant."},
+        {"role": "user", "content": prompt}
+    ]
+    result = query_llm(messages)
+    return result.strip().lower().startswith("yes")
+
 @router.post("/twilio/webhook")
 async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
     logging.info("==== /twilio/webhook endpoint called ====")
@@ -202,12 +215,14 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         if answers:
             consent_answer = ""
             for a in answers:
-                if a.transcript and a.transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
-                    consent_answer = a.transcript.strip().lower()
-                    break
+                if a.transcript:
+                    # Use LLM to judge consent
+                    if llm_judge_consent(a.transcript.strip()):
+                        consent_answer = a.transcript.strip().lower()
+                        break
             consent_given = bool(consent_answer)
             if consent_given:
-                consent_index = next(i for i, a in enumerate(answers) if a.transcript and a.transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"])
+                consent_index = next(i for i, a in enumerate(answers) if a.transcript and llm_judge_consent(a.transcript.strip()))
                 question_answers = answers[consent_index+1:]
             else:
                 question_answers = []
@@ -271,8 +286,8 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
             # If waiting for consent
             elif answers and not consent_given:
                 logging.info(f"Waiting for consent, got: {answers[0].transcript if answers else None}")
-                # Check if user said yes
-                if answers[0].transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
+                # Use LLM to judge consent
+                if llm_judge_consent(answers[0].transcript.strip()):
                     # Ask first question
                     question = question_texts[0]
                     audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
