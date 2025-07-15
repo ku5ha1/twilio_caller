@@ -233,7 +233,11 @@ class CallRequest(BaseModel):
 @app.post("/twilio/webhook")
 async def twilio_webhook(request: Request):
     try:
+        # Log raw body and form for debugging Twilio payloads
+        raw_body = await request.body()
+        logger.info(f"Raw request body: {raw_body}")
         form = await request.form()
+        logger.info(f"Form data: {dict(form)}")
         candidate_name = sanitize_candidate_name(request.query_params.get("candidate_name", "Candidate"))
         speech_result = form.get("SpeechResult", "").strip()
         call_status = form.get("CallStatus")
@@ -242,18 +246,25 @@ async def twilio_webhook(request: Request):
         consent_given, answered_count = get_interview_state(candidate_data)
         response = VoiceResponse()
 
+        # Helper: Add a 1-second pause or beep before Gather
+        def add_ready_signal(resp):
+            # Use a short beep (Twilio's holdmusic is a short beep at start)
+            resp.play("https://twimlets.com/holdmusic?Bucket=com.twilio.music.ambient")
+            # Or, for a true pause: resp.pause(length=1)
+
         # FIRST-TIME CALL HANDLING (no speech check yet)
         if not speech_result and not candidate_data.get("_prompted"):
             logger.info("Initial call greeting")
             candidate_data["_prompted"] = True
             save_candidate_data(candidate_id, candidate_data)
+            add_ready_signal(response)
             greet = f"Hello {candidate_name}, this is {HR_NAME} from Digi9. Is this a good time to talk?"
             gather = Gather(
                 input="speech",
-                timeout=10,  # 10 sec to start speaking
-                speechTimeout=3,  # 3 sec silence ends
-                language="en-IN",
-                action=f"/twilio/webhook?candidate_name={candidate_name}",
+                timeout=10,
+                speechTimeout=5,  # Increased pause time
+                language="en-US",  # Improved recognition
+                # action=f"/twilio/webhook?candidate_name={candidate_name}",  # Temporarily removed for test
                 method="POST"
             )
             gather.say(greet)
@@ -266,17 +277,17 @@ async def twilio_webhook(request: Request):
             if not candidate_data.get("_retried"):
                 candidate_data["_retried"] = True
                 save_candidate_data(candidate_id, candidate_data)
+                add_ready_signal(response)
                 retry_prompt = "We didn't hear your response. Please answer verbally after the beep."
                 gather = Gather(
                     input="speech",
                     timeout=10,
-                    speechTimeout=3,
-                    language="en-IN",
-                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    speechTimeout=5,
+                    language="en-US",
+                    # action=f"/twilio/webhook?candidate_name={candidate_name}",
                     method="POST"
                 )
                 gather.say(retry_prompt)
-                gather.play("https://twimlets.com/holdmusic?Bucket=com.twilio.music.ambient")  # Add beep sound
                 response.append(gather)
             else:
                 response.say("We're having trouble hearing you. Please call back later.")
@@ -284,7 +295,6 @@ async def twilio_webhook(request: Request):
             return Response(content=str(response), media_type="application/xml")
 
         # INTERVIEW FLOW
-        # 1. Consent not yet given: process consent
         if not consent_given:
             if llm_judge_consent(speech_result):
                 candidate_data["consent"] = True
@@ -293,12 +303,13 @@ async def twilio_webhook(request: Request):
                 # Ask first question
                 question_num = 0
                 question = BDE_QUESTIONS[question_num]
+                add_ready_signal(response)
                 gather = Gather(
                     input="speech",
                     timeout=INPUT_TIMEOUT,
-                    speechTimeout=SPEECH_TIMEOUT,
-                    language=LANGUAGE,
-                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    speechTimeout=5,
+                    language="en-US",
+                    # action=f"/twilio/webhook?candidate_name={candidate_name}",
                     method="POST"
                 )
                 gather.say(f"Thank you. Let's begin the interview. {question}")
@@ -312,9 +323,7 @@ async def twilio_webhook(request: Request):
                 response.hangup()
                 return Response(content=str(response), media_type="application/xml")
 
-        # 2. Consent given: ask next question or save answer
         if consent_given:
-            # If all questions answered, end call
             if answered_count >= len(BDE_QUESTIONS):
                 if not candidate_data.get("interview_completed"):
                     candidate_data["interview_completed"] = True
@@ -333,12 +342,13 @@ async def twilio_webhook(request: Request):
             # Ask next question if any left
             if answered_count < len(BDE_QUESTIONS):
                 question = BDE_QUESTIONS[answered_count]
+                add_ready_signal(response)
                 gather = Gather(
                     input="speech",
                     timeout=INPUT_TIMEOUT,
-                    speechTimeout=SPEECH_TIMEOUT,
-                    language=LANGUAGE,
-                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    speechTimeout=5,
+                    language="en-US",
+                    # action=f"/twilio/webhook?candidate_name={candidate_name}",
                     method="POST"
                 )
                 gather.say(question)
