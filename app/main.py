@@ -517,7 +517,7 @@ def get_candidate_data(candidate_id: str):
         data = load_candidate_data(normalized_id)
         if data:
             return data
-            else:
+        else:
             return JSONResponse(status_code=404, content={"error": "Candidate not found"})
     except Exception as e:
         logger.error(f"Error retrieving candidate data: {str(e)}")
