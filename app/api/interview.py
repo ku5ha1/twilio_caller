@@ -288,9 +288,9 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
                 logging.info(f"Waiting for consent, got: {answers[0].transcript if answers else None}")
                 # Use LLM to judge consent
                 if llm_judge_consent(answers[0].transcript.strip()):
-                    # Ask first question
+                    # Play the first interview question (FIXED LOGIC)
                     question = question_texts[0]
-                    audio_filename = f"llm_message_{len(answers)+1}_tts.mp3"
+                    audio_filename = f"llm_message_{len(answers)+2}_tts.mp3"  # +2 to avoid overwriting consent audio
                     audio_path = f"media/{audio_filename}"
                     if not os.path.exists(audio_path):
                         try:
