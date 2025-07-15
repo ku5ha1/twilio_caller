@@ -25,6 +25,10 @@ def generate_speech(text, output_path):
         "text": text,
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
     }
+    # Ensure output directory exists
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     response = requests.post(ELEVENLABS_TTS_URL, json=payload, headers=headers)
     if response.status_code == 200:
         with open(output_path, "wb") as f:
