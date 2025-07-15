@@ -59,6 +59,10 @@ TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_API_URL = os.getenv("OPENAI_API_URL")
 
+SPEECH_TIMEOUT = 5  # Seconds to wait after speech ends
+INPUT_TIMEOUT = 20   # Total seconds to wait for input
+LANGUAGE = "en-IN"   # Indian English
+
 
 def validate_environment():
     """Validate all required environment variables are set"""
@@ -300,168 +304,95 @@ def initiate_call(req: CallRequest = None):
 
 @app.post("/twilio/webhook")
 async def twilio_webhook(request: Request):
-    """Handle Twilio webhook with corrected logic and enhanced logging"""
     try:
         form = await request.form()
         candidate_name = sanitize_candidate_name(request.query_params.get("candidate_name", "Candidate"))
-        to_number = form.get("To")
         speech_result = form.get("SpeechResult", "").strip()
-        call_status = form.get("CallStatus")
         
-        logger.info(f"Webhook received - Candidate: {candidate_name}, To: {to_number}, Status: {call_status}")
-        logger.info(f"Speech result: '{speech_result}'")
-        
-        # Use normalized phone number as candidate ID
-        candidate_id = normalize_candidate_id(to_number)
-        
-        # Load candidate data
+        candidate_id = normalize_candidate_id(form.get("To", ""))
         candidate_data = load_candidate_data(candidate_id)
-        
-        # Get current interview state
         consent_given, answered_count = get_interview_state(candidate_data)
         
         response = VoiceResponse()
-        
-        # Handle consent phase
+
+        # Handle silent responses
+        if not speech_result and "Digits" not in form:
+            logger.warning("No speech detected - reprompting")
+            response.say("We didn't hear your response. Please answer verbally.")
+            response.redirect(f"/twilio/webhook?candidate_name={candidate_name}")
+            return Response(content=str(response), media_type="application/xml")
+
         if not consent_given:
             if not speech_result:
-                # First call - ask for consent
-                logger.info("Asking for consent")
-                greet = f"Hello {candidate_name}, this is {HR_NAME} from Digi9, Bangalore. Is this a good time to talk?"
-                audio_filename = f"media/consent_{candidate_id}.mp3"
-                
-                if generate_audio_if_needed(greet, audio_filename):
-                    gather = Gather(
-                        input="speech dtmf",
-                        timeout=10,
-                        speechTimeout="auto",
-                        action=f"/twilio/webhook?candidate_name={candidate_name}",
-                        method="POST"
-                    )
-                    gather.play(f"/media/{os.path.basename(audio_filename)}")
-                    response.append(gather)
-                else:
-                    gather = Gather(
-                        input="speech dtmf",
-                        timeout=10,
-                        speechTimeout="auto",
-                        action=f"/twilio/webhook?candidate_name={candidate_name}",
-                        method="POST"
-                    )
-                    gather.say(greet)
-                    response.append(gather)
-                    
-                return Response(content=str(response), media_type="application/xml")
+                # Consent request with enhanced settings
+                greet = f"Hello {candidate_name}, this is {HR_NAME} from Digi9. Is this a good time to talk?"
+                gather = Gather(
+                    input="speech",
+                    timeout=INPUT_TIMEOUT,
+                    speechTimeout=SPEECH_TIMEOUT,
+                    language=LANGUAGE,
+                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    method="POST"
+                )
+                gather.say(greet)
+                response.append(gather)
             else:
                 # Process consent response
-                logger.info(f"Processing consent response: '{speech_result}'")
-                
                 if llm_judge_consent(speech_result):
                     candidate_data["consent"] = True
-                    candidate_data["consent_response"] = speech_result
+                    save_candidate_data(candidate_id, candidate_data)
                     
-                    if save_candidate_data(candidate_id, candidate_data):
-                        logger.info("Consent given, proceeding to first question")
-                        
-                        # Ask first question immediately
-                        question = BDE_QUESTIONS[0]
-                        audio_filename = f"media/question_1_{candidate_id}.mp3"
-                        
-                        if generate_audio_if_needed(question, audio_filename):
-                            gather = Gather(
-                                input="speech dtmf",
-                                timeout=15,
-                                speechTimeout="auto",
-                                action=f"/twilio/webhook?candidate_name={candidate_name}",
-                                method="POST"
-                            )
-                            gather.play(f"/media/{os.path.basename(audio_filename)}")
-                            response.append(gather)
-                        else:
-                            gather = Gather(
-                                input="speech dtmf",
-                                timeout=15,
-                                speechTimeout="auto",
-                                action=f"/twilio/webhook?candidate_name={candidate_name}",
-                                method="POST"
-                            )
-                            gather.say(question)
-                            response.append(gather)
-                        
-                        return Response(content=str(response), media_type="application/xml")
-                    else:
-                        logger.error("Failed to save consent data")
-                        response.say("I'm sorry, there was a technical issue. Please try again later.")
-                        response.hangup()
-                        return Response(content=str(response), media_type="application/xml")
-                else:
-                    logger.info("Consent not given, ending call")
-                    response.say("Thank you for your time. We will reach out at a more convenient time. Goodbye.")
-                    response.hangup()
-                    return Response(content=str(response), media_type="application/xml")
-        
-        # Handle interview questions
-        else:
-            # Save answer if we have speech result
-            if speech_result:
-                question_num = answered_count + 1
-                if question_num <= len(BDE_QUESTIONS):
-                    logger.info(f"Saving answer for question {question_num}: '{speech_result}'")
-                    candidate_data[f"Q{question_num}"] = speech_result
-                    candidate_data[f"Q{question_num}_question"] = BDE_QUESTIONS[question_num - 1]
-                    
-                    if not save_candidate_data(candidate_id, candidate_data):
-                        logger.error("Failed to save answer")
-                    
-                    answered_count += 1
-            
-            # Check if we have more questions
-            if answered_count < len(BDE_QUESTIONS):
-                question_num = answered_count + 1
-                question = BDE_QUESTIONS[answered_count]
-                audio_filename = f"media/question_{question_num}_{candidate_id}.mp3"
-                
-                logger.info(f"Asking question {question_num}: '{question}'")
-                
-                if generate_audio_if_needed(question, audio_filename):
+                    # Ask first question
+                    question = BDE_QUESTIONS[0]
                     gather = Gather(
-                        input="speech dtmf",
-                        timeout=15,
-                        speechTimeout="auto",
-                        action=f"/twilio/webhook?candidate_name={candidate_name}",
-                        method="POST"
-                    )
-                    gather.play(f"/media/{os.path.basename(audio_filename)}")
-                    response.append(gather)
-                else:
-                    gather = Gather(
-                        input="speech dtmf",
-                        timeout=15,
-                        speechTimeout="auto",
+                        input="speech",
+                        timeout=INPUT_TIMEOUT,
+                        speechTimeout=SPEECH_TIMEOUT,
+                        language=LANGUAGE,
                         action=f"/twilio/webhook?candidate_name={candidate_name}",
                         method="POST"
                     )
                     gather.say(question)
                     response.append(gather)
+                else:
+                    response.say("Thank you for your time. Goodbye.")
+                    response.hangup()
+        
+        else:
+            # Interview questions flow (same as before but with new timeouts)
+            if speech_result:
+                save_answer(candidate_id, answered_count, speech_result)
                 
-                return Response(content=str(response), media_type="application/xml")
+            if answered_count < len(BDE_QUESTIONS):
+                question = BDE_QUESTIONS[answered_count]
+                gather = Gather(
+                    input="speech",
+                    timeout=INPUT_TIMEOUT,
+                    speechTimeout=SPEECH_TIMEOUT,
+                    language=LANGUAGE,
+                    action=f"/twilio/webhook?candidate_name={candidate_name}",
+                    method="POST"
+                )
+                gather.say(question)
+                response.append(gather)
             else:
-                # Interview complete
-                logger.info("Interview completed successfully")
-                candidate_data["interview_completed"] = True
-                candidate_data["completion_time"] = datetime.now().isoformat()
-                save_candidate_data(candidate_id, candidate_data)
-                
-                response.say("Thank you for your time and responses. Our team will review your application and get back to you soon. Have a great day!")
+                response.say("Interview completed. Thank you!")
                 response.hangup()
-                return Response(content=str(response), media_type="application/xml")
-    
+
+        return Response(content=str(response), media_type="application/xml")
+
     except Exception as e:
-        logger.error(f"Unexpected error in webhook: {str(e)}")
+        logger.error(f"Webhook error: {str(e)}")
         response = VoiceResponse()
-        response.say("I'm sorry, there was a technical issue. Please try again later.")
+        response.say("Technical error occurred. Please call back later.")
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
+
+# Helper function to save answers
+def save_answer(candidate_id, question_num, answer):
+    data = load_candidate_data(candidate_id)
+    data[f"Q{question_num+1}"] = answer
+    save_candidate_data(candidate_id, data)
 
 
 @app.get("/health")
