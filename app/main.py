@@ -11,6 +11,8 @@ from voice_generator import generate_speech
 from dotenv import load_dotenv
 import re
 
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
 load_dotenv()
 
 # Configure detailed logging
