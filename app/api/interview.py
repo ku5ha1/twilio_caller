@@ -6,6 +6,7 @@ from app.dependencies import get_db
 from typing import Optional, List, Tuple
 import datetime
 import os
+from dotenv import load_dotenv
 import requests
 import logging
 from fastapi.responses import JSONResponse
@@ -15,6 +16,8 @@ from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from fastapi import Response
 from urllib.parse import urlparse
+
+load_dotenv()
 
 router = APIRouter()
 
@@ -43,8 +46,6 @@ def query_llm(messages, model="gpt-3.5-turbo", temperature=0.7):
     else:
         raise Exception(f"OpenAI API error: {response.status_code} {response.text}")
 
-
-# --- HR Bot Prompt Engineering ---
 
 def get_hr_bot_system_prompt(candidate_name, questions):
     return (
@@ -183,6 +184,7 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
             response.say("Sorry, candidate not found. Goodbye.")
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
+
         call = db.query(Call).filter(Call.candidate_id == candidate.id, Call.status == "in_progress").order_by(Call.started_at.desc()).first()
         if not call:
             logging.warning("Early return: call not found")
@@ -194,25 +196,23 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)):
         response = VoiceResponse()
         all_questions = db.query(Question).filter(Question.role == candidate.role).order_by(Question.order).all()
         question_texts = [q.text for q in all_questions]
-        # Separate consent from question answers
         answers = call.answers
         consent_given = False
         question_answers = []
         if answers:
-            # Check all answers for consent, or just the latest if still waiting for consent
             consent_answer = ""
             for a in answers:
                 if a.transcript and a.transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"]:
                     consent_answer = a.transcript.strip().lower()
                     break
             consent_given = bool(consent_answer)
-            # All answers after the first consent are question answers
             if consent_given:
                 consent_index = next(i for i, a in enumerate(answers) if a.transcript and a.transcript.strip().lower() in ["yes", "yeah", "yep", "sure", "ok", "okay"])
                 question_answers = answers[consent_index+1:]
             else:
                 question_answers = []
         logging.info(f"answers count: {len(answers) if answers else 0}, consent_given: {consent_given}, question_answers: {len(question_answers)}")
+
         # If this is the start or after an answer
         if (call_status == "in-progress" and not speech_result and not digits) or speech_result:
             logging.info(f"Processing answer: speech_result={speech_result}")
@@ -384,7 +384,6 @@ def initiate_twilio_call(candidate_id: int, db: Session = Depends(get_db)):
     to_number = candidate.phone
 
     client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    import logging
     logging.info(f"Using TWILIO_WEBHOOK_URL: {TWILIO_WEBHOOK_URL}")
     try:
         call = client.calls.create(
