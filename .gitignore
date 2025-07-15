@@ -7,3 +7,7 @@ __pycache__/
 *.pyo
 *.pyd   
 
+questions.txt
+
+log.txt
+
