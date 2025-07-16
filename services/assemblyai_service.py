@@ -5,14 +5,34 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def transcribe_audio(audio_url: str, poll_interval=3, max_attempts=20):
+def download_twilio_recording(recording_url):
+    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+    response = requests.get(recording_url, auth=(twilio_sid, twilio_token))
+    response.raise_for_status()
+    return response.content
+
+def upload_to_assemblyai(audio_bytes):
+    headers = {'authorization': os.getenv("ASSEMBLYAI_API_KEY")}
+    upload_response = requests.post(
+        'https://api.assemblyai.com/v2/upload',
+        headers=headers,
+        data=audio_bytes
+    )
+    upload_response.raise_for_status()
+    return upload_response.json()['upload_url']
+
+def transcribe_audio(recording_url, poll_interval=3, max_attempts=20):
+    # Download from Twilio
+    audio_bytes = download_twilio_recording(recording_url)
+    # Upload to AssemblyAI
+    assemblyai_url = upload_to_assemblyai(audio_bytes)
+    # Start transcription
     headers = {
         "authorization": os.getenv("ASSEMBLYAI_API_KEY"),
         "content-type": "application/json"
     }
-    data = {
-        "audio_url": audio_url
-    }
+    data = {"audio_url": assemblyai_url}
     url = "https://api.assemblyai.com/v2/transcript"
     response = requests.post(url, json=data, headers=headers)
     response.raise_for_status()
