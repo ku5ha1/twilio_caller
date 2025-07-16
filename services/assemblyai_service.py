@@ -5,12 +5,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def download_twilio_recording(recording_url):
+def download_twilio_recording(recording_url, max_attempts=5, delay=3):
     twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
     twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
-    response = requests.get(recording_url, auth=(twilio_sid, twilio_token))
-    response.raise_for_status()
-    return response.content
+    for attempt in range(max_attempts):
+        response = requests.get(recording_url, auth=(twilio_sid, twilio_token))
+        if response.status_code == 200:
+            return response.content
+        elif response.status_code == 404:
+            print(f"Recording not ready yet (attempt {attempt+1}/{max_attempts}), retrying in {delay}s...")
+            time.sleep(delay)
+        else:
+            response.raise_for_status()
+    raise Exception(f"Recording not found after {max_attempts} attempts: {recording_url}")
 
 def upload_to_assemblyai(audio_bytes):
     headers = {'authorization': os.getenv("ASSEMBLYAI_API_KEY")}
@@ -23,7 +30,7 @@ def upload_to_assemblyai(audio_bytes):
     return upload_response.json()['upload_url']
 
 def transcribe_audio(recording_url, poll_interval=3, max_attempts=20):
-    # Download from Twilio
+    # Download from Twilio with retry
     audio_bytes = download_twilio_recording(recording_url)
     # Upload to AssemblyAI
     assemblyai_url = upload_to_assemblyai(audio_bytes)
