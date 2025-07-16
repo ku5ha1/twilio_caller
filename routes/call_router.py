@@ -120,7 +120,7 @@ def twiml_play_and_record(audio_file, next_step):
     return Response(content=f'''
         <Response>
             <Play>{PUBLIC_BASE_URL}/media/{audio_file}</Play>
-            <Record action="{action_url}" method="POST" timeout="3" transcribe="false"/>
+            <Record action="{action_url}" method="POST" timeout="2" transcribe="false"/>
         </Response>
     ''', media_type="application/xml")
 
