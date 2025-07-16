@@ -1,11 +1,15 @@
-import requests
 import os
-import time
 from dotenv import load_dotenv
 from pydub import AudioSegment
 import io
+from elevenlabs.client import ElevenLabs
+import requests
 
 load_dotenv()
+
+elevenlabs = ElevenLabs(
+    api_key=os.getenv("ELEVENLABS_API_KEY"),
+)
 
 def download_twilio_recording(recording_url, max_attempts=5, delay=3):
     twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
@@ -16,38 +20,28 @@ def download_twilio_recording(recording_url, max_attempts=5, delay=3):
             return response.content
         elif response.status_code == 404:
             print(f"Recording not ready yet (attempt {attempt+1}/{max_attempts}), retrying in {delay}s...")
+            import time
             time.sleep(delay)
         else:
             response.raise_for_status()
     raise Exception(f"Recording not found after {max_attempts} attempts: {recording_url}")
 
-def convert_audio(audio_bytes, target_format="wav"):
+def convert_to_mp3(audio_bytes):
     audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
     audio = audio.set_frame_rate(16000).set_channels(1)
-    out_io = io.BytesIO()
-    audio.export(out_io, format=target_format)
-    out_io.seek(0)
-    return out_io.read()
+    mp3_io = io.BytesIO()
+    audio.export(mp3_io, format="mp3")
+    mp3_io.seek(0)
+    return mp3_io
 
 def transcribe_audio(recording_url):
     audio_bytes = download_twilio_recording(recording_url)
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    url = "https://api.elevenlabs.io/v1/speech-to-text"
-    headers = {
-        "xi-api-key": api_key,
-        "Accept": "application/json"
-    }
-    # Try WAV first
-    try:
-        wav_bytes = convert_audio(audio_bytes, "wav")
-        files = {"audio": ("audio.wav", wav_bytes, "audio/wav")}
-        response = requests.post(url, headers=headers, files=files)
-        response.raise_for_status()
-        return response.json()["text"]
-    except Exception as e:
-        print(f"WAV failed: {e}, trying MP3...")
-        mp3_bytes = convert_audio(audio_bytes, "mp3")
-        files = {"audio": ("audio.mp3", mp3_bytes, "audio/mp3")}
-        response = requests.post(url, headers=headers, files=files)
-        response.raise_for_status()
-        return response.json()["text"]
+    mp3_io = convert_to_mp3(audio_bytes)
+    transcription = elevenlabs.speech_to_text.convert(
+        file=mp3_io,
+        model_id="scribe_v1",
+        tag_audio_events=True,
+        language_code="eng",
+        diarize=True,
+    )
+    return transcription["text"] if isinstance(transcription, dict) else transcription
