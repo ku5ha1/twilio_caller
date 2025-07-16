@@ -50,7 +50,7 @@ async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
             else:
                 return twiml_play_and_record("reschedule_request.mp3", next_step="reschedule")
         else:
-            return twiml_play_and_record("hr_intro.mp3", next_step="consent")
+            return twiml_play_and_record("HR_intro_voice.mp3", next_step="consent")
     elif step == "reschedule":
         if recording_url:
             background_tasks.add_task(store_reschedule, call_sid, recording_url)
