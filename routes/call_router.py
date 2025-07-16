@@ -94,10 +94,10 @@ async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
     response = VoiceResponse()
 
     if step == "consent":
-        # Use <Gather input="speech"> for consent
+        # Play HR intro, then ask for consent
+        response.play(f"{PUBLIC_BASE_URL}/media/HR_intro_voice.mp3")
         action_url = f"{PUBLIC_BASE_URL}/twilio-webhook/consent-speech?call_sid={call_sid}&attempts=0"
         gather = response.gather(input="speech", action=action_url, method="POST", timeout=5)
-        response.play(f"{PUBLIC_BASE_URL}/media/HR_intro_voice.mp3")
         gather.say("Do you consent to proceed with this interview? Please say yes or no.")
         return Response(content=str(response), media_type="application/xml")
     elif step == "reschedule":
