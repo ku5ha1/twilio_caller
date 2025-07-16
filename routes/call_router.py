@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Response, BackgroundTasks
+from fastapi import APIRouter, Request, Response, BackgroundTasks, Form
 from urllib.parse import urlencode
 from pydantic import BaseModel
 from services import twilio_service, assemblyai_service
@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 import os
 from utils.db_utils import get_mongo_collection
 from services.assemblyai_service import transcribe_audio
+from services.openai_service import analyze_consent
+from twilio.twiml.voice_response import VoiceResponse
 
 load_dotenv()
 
@@ -75,27 +77,29 @@ async def start_call(request: StartCallRequest):
     twilio_service.make_call(request.phone)
     return {"status": "Call initiated"}
 
+MAX_CONSENT_ATTEMPTS = 3
+
 @router.post("/twilio-webhook")
 async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
     form = await request.form()
     step = request.query_params.get("step", "consent")
     call_sid = form.get("CallSid")
-    recording_url = form.get("RecordingUrl")
+    consent_attempts = int(form.get("consent_attempts", 0))
 
     if call_sid not in CALL_STATE:
-        CALL_STATE[call_sid] = {"answers": [], "reschedule": None}
+        CALL_STATE[call_sid] = {"answers": [], "reschedule": None, "consent_attempts": 0}
 
     if step == "consent":
-        if recording_url:
-            # Synchronously transcribe consent
-            transcript = transcribe_audio(recording_url)
-            process_consent(call_sid, recording_url, transcript)
-            if is_positive_consent(transcript):
-                return twiml_play_and_record(QUESTIONS[0], next_step="question1")
-            else:
-                return twiml_play_and_record("reschedule_request.mp3", next_step="reschedule")
-        else:
-            return twiml_play_and_record("HR_intro_voice.mp3", next_step="consent")
+        # Use <Gather input="speech"> for consent
+        action_url = f"{PUBLIC_BASE_URL}/twilio-webhook/consent-speech?call_sid={call_sid}&attempts=0"
+        return Response(content=f'''
+            <Response>
+                <Play>{PUBLIC_BASE_URL}/media/HR_intro_voice.mp3</Play>
+                <Gather input="speech" action="{action_url}" method="POST" timeout="5">
+                    <Say>Do you consent to proceed with this interview? Please say yes or no.</Say>
+                </Gather>
+            </Response>
+        ''', media_type="application/xml")
     elif step == "reschedule":
         if recording_url:
             background_tasks.add_task(store_reschedule, call_sid, recording_url)
@@ -114,6 +118,52 @@ async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
             return twiml_play_and_record(QUESTIONS[q_num-1], next_step=f"question{q_num}")
     else:
         return twiml_play("post_interview_reply.mp3")
+
+@router.post("/twilio-webhook/consent-speech")
+async def consent_speech(request: Request, call_sid: str = None, attempts: int = 0):
+    form = await request.form()
+    speech_result = form.get("SpeechResult", "")
+    call_sid = call_sid or form.get("CallSid")
+    attempts = int(attempts)
+    collection = get_mongo_collection()
+
+    # Analyze consent intent using LLM
+    llm_result = analyze_consent(speech_result)
+    intent = "affirmative" if llm_result.get("proceed") else "negative"
+    # Heuristic for reschedule/unclear
+    if any(word in speech_result.lower() for word in ["reschedule", "another time", "later"]):
+        intent = "reschedule"
+    elif not llm_result.get("proceed") and not any(word in speech_result.lower() for word in ["no", "not", "never"]):
+        intent = "unclear"
+
+    # Store transcript and LLM result
+    collection.update_one(
+        {"_id": call_sid},
+        {"$set": {"consent": {"transcript": speech_result, "llm_result": llm_result, "attempts": attempts}}},
+        upsert=True
+    )
+
+    response = VoiceResponse()
+    if intent == "affirmative":
+        # Proceed to first question
+        response.play(f"{PUBLIC_BASE_URL}/media/{QUESTIONS[0]}")
+        response.record(action=f"/twilio-webhook?step=question1", method="POST", timeout=2, transcribe="false")
+    elif intent == "negative":
+        response.play(f"{PUBLIC_BASE_URL}/media/negative_consent.mp3")
+        response.hangup()
+    elif intent == "reschedule":
+        response.play(f"{PUBLIC_BASE_URL}/media/reschedule_request.mp3")
+        response.record(action=f"/twilio-webhook?step=reschedule", method="POST", timeout=2, transcribe="false")
+    else:  # unclear
+        attempts += 1
+        if attempts >= MAX_CONSENT_ATTEMPTS:
+            response.play(f"{PUBLIC_BASE_URL}/media/negative_consent.mp3")
+            response.hangup()
+        else:
+            response.play(f"{PUBLIC_BASE_URL}/media/unclear_response.mp3")
+            gather_url = f"{PUBLIC_BASE_URL}/twilio-webhook/consent-speech?call_sid={call_sid}&attempts={attempts}"
+            response.gather(input="speech", action=gather_url, method="POST", timeout=5).say("Do you consent to proceed with this interview? Please say yes or no.")
+    return Response(content=str(response), media_type="application/xml")
 
 def twiml_play_and_record(audio_file, next_step):
     action_url = f"/twilio-webhook?step={next_step}"
