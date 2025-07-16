@@ -44,4 +44,9 @@ def transcribe_audio(recording_url):
         language_code="eng",
         diarize=True,
     )
-    return transcription["text"] if isinstance(transcription, dict) else transcription
+    # Only return the plain text transcript for MongoDB
+    if isinstance(transcription, dict):
+        return transcription.get("text", "")
+    if hasattr(transcription, "text"):
+        return transcription.text
+    return str(transcription)
