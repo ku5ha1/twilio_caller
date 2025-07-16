@@ -119,6 +119,26 @@ async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
     else:
         return twiml_play("post_interview_reply.mp3")
 
+# Minimal working consent-speech endpoint for debugging
+@router.post("/twilio-webhook/consent-speech")
+async def consent_speech_debug(request: Request, call_sid: str = None, attempts: int = 0):
+    print("[DEBUG] /twilio-webhook/consent-speech endpoint called")
+    try:
+        form = await request.form()
+        speech_result = form.get("SpeechResult", "")
+        print(f"[DEBUG] SpeechResult: {speech_result}")
+        response = VoiceResponse()
+        response.say("Test response, always valid TwiML.")
+        print("[DEBUG] Returning TwiML:", str(response))
+        return Response(content=str(response), media_type="application/xml")
+    except Exception as e:
+        print(f"[DEBUG] Consent speech error: {e}")
+        error_response = VoiceResponse()
+        error_response.say("Sorry, there was an error. Please try again later.")
+        error_response.hangup()
+        print("[DEBUG] Returning error TwiML:", str(error_response))
+        return Response(content=str(error_response), media_type="application/xml")
+
 @router.post("/twilio-webhook/consent-speech")
 async def consent_speech(request: Request, call_sid: str = None, attempts: int = 0):
     try:
