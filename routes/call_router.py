@@ -5,6 +5,7 @@ from services import twilio_service, assemblyai_service
 from dotenv import load_dotenv
 import os
 from utils.db_utils import get_mongo_collection
+from services.assemblyai_service import transcribe_audio
 
 load_dotenv()
 
@@ -26,6 +27,48 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL")
 if not PUBLIC_BASE_URL:
     raise ValueError("PUBLIC_BASE_URL must be set in .env (e.g., https://your-app.onrender.com)")
 
+# Consent analysis function
+def is_positive_consent(transcript):
+    transcript = transcript.lower()
+    positive_keywords = ["yes", "sure", "okay", "go ahead", "alright"]
+    negative_keywords = ["no", "not now", "busy", "later", "can't", "cannot"]
+    if any(word in transcript for word in positive_keywords):
+        return True
+    if any(word in transcript for word in negative_keywords):
+        return False
+    return False
+
+def process_consent(call_sid, recording_url, transcript):
+    collection = get_mongo_collection()
+    collection.update_one(
+        {"_id": call_sid},
+        {"$set": {"consent": {"recording_url": recording_url, "transcript": transcript}}},
+        upsert=True
+    )
+    print(f"[Consent] CallSid: {call_sid}, Recording: {recording_url}, Transcript: {transcript}")
+
+def store_reschedule(call_sid, recording_url):
+    # Background transcription for reschedule
+    transcript = transcribe_audio(recording_url)
+    collection = get_mongo_collection()
+    collection.update_one(
+        {"_id": call_sid},
+        {"$set": {"reschedule": {"recording_url": recording_url, "transcript": transcript}}},
+        upsert=True
+    )
+    print(f"[Reschedule] CallSid: {call_sid}, Recording: {recording_url}, Transcript: {transcript}")
+
+def store_answer(call_sid, q_num, recording_url):
+    # Background transcription for answers
+    transcript = transcribe_audio(recording_url)
+    collection = get_mongo_collection()
+    collection.update_one(
+        {"_id": call_sid},
+        {"$push": {"answers": {"question": q_num, "recording_url": recording_url, "transcript": transcript}}},
+        upsert=True
+    )
+    print(f"[Answer] CallSid: {call_sid}, Q{q_num}: {recording_url}, Transcript: {transcript}")
+
 @router.post("/start-call")
 async def start_call(request: StartCallRequest):
     # Optionally, you can use 'name' to personalize the flow in the future
@@ -44,17 +87,19 @@ async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
 
     if step == "consent":
         if recording_url:
-            background_tasks.add_task(process_consent, call_sid, recording_url)
-            if is_positive_consent(recording_url):
+            # Synchronously transcribe consent
+            transcript = transcribe_audio(recording_url)
+            process_consent(call_sid, recording_url, transcript)
+            if is_positive_consent(transcript):
                 return twiml_play_and_record(QUESTIONS[0], next_step="question1")
             else:
                 return twiml_play_and_record("reschedule_request.mp3", next_step="reschedule")
         else:
-            return twiml_play_and_record("HR_intro_voice.mp3", next_step="consent")
+            return twiml_play_and_record("hr_intro.mp3", next_step="consent")
     elif step == "reschedule":
         if recording_url:
             background_tasks.add_task(store_reschedule, call_sid, recording_url)
-            return twiml_play("reschedule_reply.mp3")
+            return twiml_play("reschedule_reply.mp3")  # Confirm and end call
         else:
             return twiml_play_and_record("reschedule_request.mp3", next_step="reschedule")
     elif step.startswith("question"):
@@ -85,37 +130,3 @@ def twiml_play(audio_file):
             <Play>{PUBLIC_BASE_URL}/media/{audio_file}</Play>
         </Response>
     ''', media_type="application/xml")
-
-def is_positive_consent(recording_url):
-    # TODO: Implement keyword or LLM-based consent check
-    return True
-
-def process_consent(call_sid, recording_url):
-    transcript = assemblyai_service.transcribe_audio(recording_url)
-    collection = get_mongo_collection()
-    collection.update_one(
-        {"_id": call_sid},
-        {"$set": {"consent": {"recording_url": recording_url, "transcript": transcript}}},
-        upsert=True
-    )
-    print(f"[Consent] CallSid: {call_sid}, Recording: {recording_url}, Transcript: {transcript}")
-
-def store_reschedule(call_sid, recording_url):
-    transcript = assemblyai_service.transcribe_audio(recording_url)
-    collection = get_mongo_collection()
-    collection.update_one(
-        {"_id": call_sid},
-        {"$set": {"reschedule": {"recording_url": recording_url, "transcript": transcript}}},
-        upsert=True
-    )
-    print(f"[Reschedule] CallSid: {call_sid}, Recording: {recording_url}, Transcript: {transcript}")
-
-def store_answer(call_sid, q_num, recording_url):
-    transcript = assemblyai_service.transcribe_audio(recording_url)
-    collection = get_mongo_collection()
-    collection.update_one(
-        {"_id": call_sid},
-        {"$push": {"answers": {"question": q_num, "recording_url": recording_url, "transcript": transcript}}},
-        upsert=True
-    )
-    print(f"[Answer] CallSid: {call_sid}, Q{q_num}: {recording_url}, Transcript: {transcript}")

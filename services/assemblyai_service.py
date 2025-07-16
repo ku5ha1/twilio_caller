@@ -19,39 +19,19 @@ def download_twilio_recording(recording_url, max_attempts=5, delay=3):
             response.raise_for_status()
     raise Exception(f"Recording not found after {max_attempts} attempts: {recording_url}")
 
-def upload_to_assemblyai(audio_bytes):
-    headers = {'authorization': os.getenv("ASSEMBLYAI_API_KEY")}
-    upload_response = requests.post(
-        'https://api.assemblyai.com/v2/upload',
-        headers=headers,
-        data=audio_bytes
-    )
-    upload_response.raise_for_status()
-    return upload_response.json()['upload_url']
-
-def transcribe_audio(recording_url, poll_interval=3, max_attempts=20):
+def transcribe_audio(recording_url):
     # Download from Twilio with retry
     audio_bytes = download_twilio_recording(recording_url)
-    # Upload to AssemblyAI
-    assemblyai_url = upload_to_assemblyai(audio_bytes)
-    # Start transcription
+    # Transcribe with ElevenLabs STT
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    url = "https://api.elevenlabs.io/v1/speech-to-text"
     headers = {
-        "authorization": os.getenv("ASSEMBLYAI_API_KEY"),
-        "content-type": "application/json"
+        "xi-api-key": api_key,
+        "Accept": "application/json"
     }
-    data = {"audio_url": assemblyai_url}
-    url = "https://api.assemblyai.com/v2/transcript"
-    response = requests.post(url, json=data, headers=headers)
+    files = {
+        "audio": ("audio.wav", audio_bytes, "audio/wav")
+    }
+    response = requests.post(url, headers=headers, files=files)
     response.raise_for_status()
-    transcript_id = response.json()['id']
-
-    for attempt in range(max_attempts):
-        poll_response = requests.get(f"{url}/{transcript_id}", headers=headers)
-        poll_response.raise_for_status()
-        status = poll_response.json()['status']
-        if status == 'completed':
-            return poll_response.json()['text']
-        elif status == 'failed':
-            raise Exception(f"Transcription failed: {poll_response.json()}")
-        time.sleep(poll_interval)
-    raise TimeoutError("Transcription polling timed out.")
+    return response.json()["text"]  # Adjust if ElevenLabs response structure differs
