@@ -12,7 +12,7 @@ if not (TWILIO_PHONE_NUMBER and PUBLIC_BASE_URL):
     raise ValueError('TWILIO_PHONE_NUMBER and PUBLIC_BASE_URL must be set in .env')
 
 TWILIO_WEBHOOK_URL = f"{PUBLIC_BASE_URL}/twilio-webhook"
-HR_INTRO_AUDIO_URL = os.getenv('HR_INTRO_AUDIO_URL', f"{PUBLIC_BASE_URL}/media/hr_intro.mp3")
+HR_INTRO_AUDIO_URL = os.getenv('HR_INTRO_AUDIO_URL', f"{PUBLIC_BASE_URL}/media/HR_intro_voice.mp3")
 
 def make_call(phone_number):
     try:
