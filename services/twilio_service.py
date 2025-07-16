@@ -7,11 +7,12 @@ load_dotenv()
 
 client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
-TWILIO_WEBHOOK_URL = os.getenv('TWILIO_WEBHOOK_URL', 'https://limitation-must-gba-ce.trycloudflare.com/twilio-webhook')
-HR_INTRO_AUDIO_URL = os.getenv('HR_INTRO_AUDIO_URL')
+PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL')
+if not (TWILIO_PHONE_NUMBER and PUBLIC_BASE_URL):
+    raise ValueError('TWILIO_PHONE_NUMBER and PUBLIC_BASE_URL must be set in .env')
 
-if not TWILIO_PHONE_NUMBER:
-    raise ValueError('TWILIO_PHONE_NUMBER not found')
+TWILIO_WEBHOOK_URL = f"{PUBLIC_BASE_URL}/twilio-webhook"
+HR_INTRO_AUDIO_URL = os.getenv('HR_INTRO_AUDIO_URL', f"{PUBLIC_BASE_URL}/media/hr_intro.mp3")
 
 def make_call(phone_number):
     try:
@@ -28,12 +29,10 @@ def make_call(phone_number):
 
 def handle_incoming_call(record_action_url=None):
     response = VoiceResponse()
-    # First message from cloned HR voice
-    response.play(HR_INTRO_AUDIO_URL)  # Pre-recorded intro
-    # Record candidate's reply, send to action URL for further processing
+    response.play(HR_INTRO_AUDIO_URL)
     response.record(
         timeout=10,
-        action=record_action_url or (TWILIO_WEBHOOK_URL + "/recording"),
-        transcribe=False  # We'll use AssemblyAI for transcription
+        action=record_action_url or f"{TWILIO_WEBHOOK_URL}/recording",
+        transcribe=False
     )
     return str(response)
