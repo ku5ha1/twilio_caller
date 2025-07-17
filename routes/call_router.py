@@ -19,17 +19,14 @@ class StartCallRequest(BaseModel):
     name: str
     phone: str
 
-# List of question audio files in order
 QUESTIONS = [f"question{i}.mp3" for i in range(1, 13)]
 
-# Helper: Simple in-memory storage for answers (for demo)
 CALL_STATE = {}
 
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL")
 if not PUBLIC_BASE_URL:
     raise ValueError("PUBLIC_BASE_URL must be set in .env (e.g., https://your-app.onrender.com)")
 
-# Consent analysis function
 def is_positive_consent(transcript):
     transcript = transcript.lower()
     positive_keywords = ["yes", "sure", "okay", "go ahead", "alright"]
@@ -73,13 +70,11 @@ def store_answer(call_sid, q_num, recording_url):
 
 @router.post("/start-call")
 async def start_call(request: StartCallRequest):
-    # Optionally, you can use 'name' to personalize the flow in the future
     twilio_service.make_call(request.phone)
     return {"status": "Call initiated"}
 
 MAX_CONSENT_ATTEMPTS = 3
 
-# Standardize all TwiML generation in twilio_webhook to use VoiceResponse
 @router.post("/twilio-webhook")
 async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
     form = await request.form()
@@ -137,16 +132,10 @@ async def consent_speech(request: Request, call_sid: str = None, attempts: int =
         attempts = int(attempts)
         collection = get_mongo_collection()
 
-        # Analyze consent intent using LLM
+        # Analyze consent intent using LLM (now returns 'intent')
         llm_result = analyze_consent(speech_result)
-        intent = "affirmative" if llm_result.get("proceed") else "negative"
-        # Heuristic for reschedule/unclear
-        if any(word in speech_result.lower() for word in ["reschedule", "another time", "later"]):
-            intent = "reschedule"
-        elif not llm_result.get("proceed") and not any(word in speech_result.lower() for word in ["no", "not", "never"]):
-            intent = "unclear"
+        intent = llm_result.get("intent")
 
-        # Store transcript and LLM result
         collection.update_one(
             {"_id": call_sid},
             {"$set": {"consent": {"transcript": speech_result, "llm_result": llm_result, "attempts": attempts}}},

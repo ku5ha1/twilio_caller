@@ -9,16 +9,13 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def analyze_consent(transcript: str):
     prompt = f"""
-    Is the following candidate response indicating consent to continue?
-
+    Classify the following candidate response as one of: 'affirmative', 'negative', 'reschedule', or 'unclear'.
+    Only return a JSON object with an 'intent' key and no explanation.
+    
     Transcript: "{transcript}"
 
-    Respond in JSON format:
-    {{
-      "proceed": true|false,
-      "reason": "short explanation",
-      "tone": "positive/neutral/negative"
-    }}
+    Example response:
+    {{ "intent": "affirmative" }}
     """
     try:
         response = client.chat.completions.create(
@@ -32,4 +29,4 @@ def analyze_consent(transcript: str):
     except Exception as e:
         # Log or handle the error as needed
         print(f"OpenAI API error: {e}")
-        return {"proceed": False, "reason": "LLM error", "tone": "neutral"}
+        return {"intent": "unclear"}
