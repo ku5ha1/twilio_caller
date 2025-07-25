@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Request, Response, BackgroundTasks, Form
 from urllib.parse import urlencode
 from pydantic import BaseModel
-from services import twilio_service, assemblyai_service
+from services import twilio_service
 from dotenv import load_dotenv
 import os
 from utils.db_utils import get_mongo_collection
-from services.assemblyai_service import transcribe_audio
+from services.elevenlabs_stt import transcribe_audio
 from services.openai_service import analyze_consent
 from twilio.twiml.voice_response import VoiceResponse
 
